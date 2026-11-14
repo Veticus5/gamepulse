@@ -5,7 +5,7 @@ import logging
 import sys
 from pathlib import Path
 
-from gamepulse import collect_ccu
+from gamepulse import collect_ccu, collect_news
 from gamepulse.config import load_games
 from gamepulse.steam import make_client
 
@@ -17,6 +17,12 @@ def _parser() -> argparse.ArgumentParser:
     common.add_argument("--data-dir", type=Path, default=Path("data"), help="where raw data goes")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("ccu", parents=[common], help="current player counts")
+    news = sub.add_parser("news", parents=[common], help="news items not stored yet")
+    news.add_argument(
+        "--full",
+        action="store_true",
+        help="walk the whole history (first run, or after an interrupted one)",
+    )
     return parser
 
 
@@ -31,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     with make_client() as client:
         if args.command == "ccu":
             succeeded = collect_ccu.run(client, games, args.data_dir)
+        elif args.command == "news":
+            succeeded = collect_news.run(client, games, args.data_dir, full=args.full)
         else:  # pragma: no cover - argparse rejects unknown commands
             raise AssertionError(args.command)
     return 0 if succeeded else 1
