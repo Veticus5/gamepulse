@@ -50,3 +50,18 @@ def test_unexpected_shape_is_a_failure(tmp_path, client_for):
 def test_html_body_is_a_failure(tmp_path, client_for):
     handler = lambda request: httpx.Response(200, text="<html></html>")
     assert collect_fivem.run(client_for(handler), tmp_path, pause=0) == 0
+
+
+def test_unexpected_error_is_recorded_and_does_not_stop_the_rest(tmp_path, client_for, monkeypatch):
+    calls = []
+
+    def flaky(client, url):
+        calls.append(url)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+        return [1, 2, 3]
+
+    monkeypatch.setattr(collect_fivem, "_fetch_counts", flaky)
+    assert collect_fivem.run(client_for(lambda r: httpx.Response(500)), tmp_path, pause=0) == 1
+    _, stored = rows(tmp_path)
+    assert [r["ok"] for r in stored] == [False, True]

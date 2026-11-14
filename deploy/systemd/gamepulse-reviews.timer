@@ -2,7 +2,7 @@
 Description=GamePulse: Steam review histogram snapshot
 
 [Timer]
-OnCalendar=daily
+OnCalendar=*-*-* 12:00:00
 RandomizedDelaySec=30
 Persistent=true
 

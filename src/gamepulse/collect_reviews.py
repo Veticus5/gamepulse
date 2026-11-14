@@ -25,13 +25,16 @@ def run(client: httpx.Client, games: list[Game], data_dir: Path, *, pause: float
             time.sleep(pause)
         try:
             results = fetch_review_histogram(client, game.appid)
+            append_jsonl(
+                data_dir / "raw" / "review_histogram" / f"{game.appid}.jsonl",
+                [{"fetched_at": utc_now_iso(), "appid": game.appid, "results": results}],
+            )
         except SteamError as exc:
             log.warning("reviews %s (%s): %s", game.appid, game.name, exc)
             continue
-        append_jsonl(
-            data_dir / "raw" / "review_histogram" / f"{game.appid}.jsonl",
-            [{"fetched_at": utc_now_iso(), "appid": game.appid, "results": results}],
-        )
+        except Exception:
+            log.exception("reviews %s (%s): unexpected error", game.appid, game.name)
+            continue
         succeeded += 1
     log.info("reviews: %d/%d games ok", succeeded, len(games))
     return succeeded

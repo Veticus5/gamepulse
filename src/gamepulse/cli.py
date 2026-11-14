@@ -1,9 +1,11 @@
 """Command line entry point: ``gamepulse ccu|news|reviews|fivem``."""
 
 import argparse
+import fcntl
 import logging
 import sys
 from pathlib import Path
+from typing import IO
 
 from gamepulse import collect_ccu, collect_fivem, collect_news, collect_reviews
 from gamepulse.config import load_games
@@ -29,6 +31,19 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _acquire_lock(data_dir: Path, command: str) -> IO | None:
+    """Take the per-collector lock; None means another run already holds it."""
+    path = data_dir / "locks" / f"{command}.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "w")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    return handle
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -37,10 +52,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command != "fivem":
         try:
             games = load_games(args.games)
-        except (OSError, ValueError, KeyError) as exc:
+        except (OSError, ValueError, KeyError, TypeError) as exc:
             print(f"gamepulse: cannot load games from {args.games}: {exc}", file=sys.stderr)
             return 1
-    with make_client() as client:
+    # Two runs of the same collector would store the same news twice.
+    lock = _acquire_lock(args.data_dir, args.command)
+    if lock is None:
+        logging.warning("%s: another run is in progress, skipping this one", args.command)
+        return 0
+    with lock, make_client() as client:
         if args.command == "ccu":
             succeeded = collect_ccu.run(client, games, args.data_dir)
         elif args.command == "news":
@@ -50,7 +70,6 @@ def main(argv: list[str] | None = None) -> int:
         else:
             succeeded = collect_fivem.run(client, args.data_dir)
     return 0 if succeeded else 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

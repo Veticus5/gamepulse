@@ -24,24 +24,29 @@ def run(client: httpx.Client, games: list[Game], data_dir: Path, *, pause: float
         if index and pause:
             time.sleep(pause)
         ts = utc_now_iso()
+        count = None
+        error = None
         try:
-            record = {
-                "ts": ts,
-                "appid": game.appid,
-                "player_count": fetch_ccu(client, game.appid),
-                "ok": True,
-                "error": None,
-            }
-            succeeded += 1
+            count = fetch_ccu(client, game.appid)
         except SteamError as exc:
             log.warning("ccu %s (%s): %s", game.appid, game.name, exc)
-            record = {
-                "ts": ts,
-                "appid": game.appid,
-                "player_count": None,
-                "ok": False,
-                "error": str(exc),
-            }
-        append_jsonl(data_dir / "raw" / "ccu" / f"{ts[:10]}.jsonl", [record])
+            error = str(exc)
+        except Exception as exc:
+            log.exception("ccu %s (%s): unexpected error", game.appid, game.name)
+            error = f"{type(exc).__name__}: {exc}"
+        record = {
+            "ts": ts,
+            "appid": game.appid,
+            "player_count": count,
+            "ok": error is None,
+            "error": error,
+        }
+        try:
+            append_jsonl(data_dir / "raw" / "ccu" / f"{ts[:10]}.jsonl", [record])
+        except Exception:
+            log.exception("ccu %s (%s): cannot store the measurement", game.appid, game.name)
+            continue
+        if error is None:
+            succeeded += 1
     log.info("ccu: %d/%d games ok", succeeded, len(games))
     return succeeded

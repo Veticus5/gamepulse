@@ -1,10 +1,9 @@
 [Unit]
 Description=GamePulse: current player counts from Steam
-Wants=network-online.target
-After=network-online.target
 
 [Service]
 Type=oneshot
 WorkingDirectory=%h/projects/gamepulse
-ExecStart=%h/.local/bin/uv run --frozen gamepulse ccu
+# The project's own environment, created once with `uv sync`.
+ExecStart=%h/projects/gamepulse/.venv/bin/gamepulse ccu
 TimeoutStartSec=15min

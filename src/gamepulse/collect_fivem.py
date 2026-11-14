@@ -43,12 +43,23 @@ def run(client: httpx.Client, data_dir: Path, *, pause: float = 0.2) -> int:
         if index and pause:
             time.sleep(pause)
         ts = utc_now_iso()
+        counts = None
+        error = None
         try:
-            record = {"ts": ts, "url": url, "counts": _fetch_counts(client, url), "ok": True, "error": None}
-            succeeded += 1
+            counts = _fetch_counts(client, url)
         except FetchError as exc:
             log.warning("fivem %s: %s", url, exc)
-            record = {"ts": ts, "url": url, "counts": None, "ok": False, "error": str(exc)}
-        append_jsonl(data_dir / "raw" / "fivem" / f"{ts[:10]}.jsonl", [record])
+            error = str(exc)
+        except Exception as exc:
+            log.exception("fivem %s: unexpected error", url)
+            error = f"{type(exc).__name__}: {exc}"
+        record = {"ts": ts, "url": url, "counts": counts, "ok": error is None, "error": error}
+        try:
+            append_jsonl(data_dir / "raw" / "fivem" / f"{ts[:10]}.jsonl", [record])
+        except Exception:
+            log.exception("fivem %s: cannot store the measurement", url)
+            continue
+        if error is None:
+            succeeded += 1
     log.info("fivem: %d/%d sources ok", succeeded, len(SOURCES))
     return succeeded

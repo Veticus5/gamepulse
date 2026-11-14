@@ -64,3 +64,26 @@ def test_cli_fivem_needs_no_games_file(monkeypatch, tmp_path):
     data_dir = tmp_path / "data"
     assert cli.main(["fivem", "--data-dir", str(data_dir)]) == 0
     assert list((data_dir / "raw" / "fivem").glob("*.jsonl"))
+
+
+def test_cli_skips_when_same_collector_is_already_running(monkeypatch, args, tmp_path):
+    import fcntl
+
+    called = []
+    monkeypatch.setattr(cli.collect_ccu, "run", lambda *a, **k: called.append(1) or 1)
+    lock = tmp_path / "data" / "locks" / "ccu.lock"
+    lock.parent.mkdir(parents=True)
+    with open(lock, "w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        assert cli.main(["ccu", *args]) == 0
+        assert called == []
+    assert cli.main(["ccu", *args]) == 0
+    assert called == [1]
+
+
+def test_cli_wrong_shaped_games_file_exits_one(monkeypatch, tmp_path, capsys):
+    use_handler(monkeypatch, lambda request: httpx.Response(500))
+    games = tmp_path / "games.toml"
+    games.write_text("games = 5\n")
+    assert cli.main(["ccu", "--games", str(games), "--data-dir", str(tmp_path / "d")]) == 1
+    assert "games.toml" in capsys.readouterr().err

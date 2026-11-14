@@ -21,10 +21,13 @@ class FakeSteam:
     def __init__(self, items_by_appid):
         self.items = items_by_appid
         self.calls = []
+        self.fail_when = lambda params: False
 
     def __call__(self, request):
         params = request.url.params
         self.calls.append(dict(params))
+        if self.fail_when(params):
+            return httpx.Response(503)
         appid = int(params["appid"])
         if appid not in self.items:
             return httpx.Response(500)
@@ -124,3 +127,69 @@ def test_records_have_fetched_at(tmp_path, client_for):
     rows = stored(tmp_path)
     assert all(r["fetched_at"].endswith("Z") for r in rows)
     assert rows[0]["title"] == "t0"
+
+
+def test_item_with_line_separator_not_duplicated_on_rerun(tmp_path, client_for):
+    items = [{"gid": "a", "date": 20, "contents": "one\u2028two"}, {"gid": "b", "date": 10}]
+    fake = FakeSteam({730: items})
+    for _ in range(3):
+        collect_news.run(client_for(fake), GAME, tmp_path, pause=0)
+    assert sorted(gids(tmp_path)) == ["a", "b"]
+
+
+def test_interrupted_incremental_walk_resumes_on_next_run(tmp_path, client_for):
+    items = make_items(200)
+    fake = FakeSteam({730: items})
+    append_jsonl(tmp_path / "raw" / "news" / "730.jsonl", items[150:])  # 50 oldest stored
+    fake.fail_when = lambda params: "enddate" in params  # every page after the first fails
+    assert collect_news.run(client_for(fake), GAME, tmp_path, pause=0) == 0
+    assert len(gids(tmp_path)) == 150  # 50 old + newest page, hole in between
+    fake.fail_when = lambda params: False
+    assert collect_news.run(client_for(fake), GAME, tmp_path, pause=0) == 1
+    assert sorted(gids(tmp_path)) == sorted(i["gid"] for i in items)
+
+
+def test_interrupted_first_backfill_resumes_without_full(tmp_path, client_for):
+    fake = FakeSteam({730: make_items(250)})
+    budget = {"left": 2}
+
+    def fail_after_two(params):
+        budget["left"] -= 1
+        return budget["left"] < 0
+
+    fake.fail_when = fail_after_two
+    assert collect_news.run(client_for(fake), GAME, tmp_path, pause=0) == 0
+    assert 0 < len(gids(tmp_path)) < 250
+    fake.fail_when = lambda params: False
+    assert collect_news.run(client_for(fake), GAME, tmp_path, pause=0) == 1
+    assert len(set(gids(tmp_path))) == len(gids(tmp_path)) == 250
+
+
+def test_no_resume_state_left_after_complete_walk(tmp_path, client_for):
+    fake = FakeSteam({730: make_items(250)})
+    collect_news.run(client_for(fake), GAME, tmp_path, pause=0)
+    assert not list((tmp_path / "state").rglob("*.json"))
+
+
+def test_unexpected_error_in_one_game_does_not_stop_the_rest(tmp_path, client_for, monkeypatch):
+    games = [Game(1, "Explodes"), Game(730, "Counter-Strike 2")]
+    fake = FakeSteam({730: make_items(5)})
+    real = collect_news.fetch_news_page
+
+    def flaky(client, appid, **kwargs):
+        if appid == 1:
+            raise RuntimeError("boom")
+        return real(client, appid, **kwargs)
+
+    monkeypatch.setattr(collect_news, "fetch_news_page", flaky)
+    assert collect_news.run(client_for(fake), games, tmp_path, pause=0) == 1
+    assert len(gids(tmp_path)) == 5
+
+
+def test_page_without_dates_fails_the_game_instead_of_passing(tmp_path, client_for):
+    items = [{"gid": f"x{i}", "date": "yesterday"} for i in range(10)]
+    fake = FakeSteam({730: []})
+    fake.items[730] = items
+    fake.__class__ = type("NoSort", (FakeSteam,), {"__call__": lambda self, request: httpx.Response(
+        200, json={"appnews": {"appid": 730, "newsitems": items, "count": 10}})})
+    assert collect_news.run(client_for(fake), GAME, tmp_path, pause=0, full=True) == 0

@@ -43,3 +43,18 @@ def test_append_after_truncated_line_starts_new_line(tmp_path):
 
 def test_utc_now_iso_format():
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", utc_now_iso())
+
+
+def test_unicode_line_separators_do_not_split_records(tmp_path):
+    path = tmp_path / "x.jsonl"
+    records = [{"gid": "1", "contents": "a\u2028b\u2029c\x85d"}, {"gid": "2"}]
+    append_jsonl(path, records)
+    assert read_jsonl(path) == records
+
+
+def test_lone_surrogate_is_stored_instead_of_raising(tmp_path):
+    path = tmp_path / "x.jsonl"
+    records = [{"gid": "1", "title": "cut emoji \ud83d"}, {"gid": "2", "title": "zażółć"}]
+    assert append_jsonl(path, records) == 2
+    assert read_jsonl(path) == records
+    path.read_bytes().decode("utf-8")  # the file stays valid UTF-8

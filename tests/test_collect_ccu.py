@@ -54,3 +54,18 @@ def test_file_named_by_utc_date(tmp_path, games, client_for):
     files, rows = records(tmp_path)
     assert len(files) == 1
     assert files[0].stem == rows[0]["ts"][:10]
+
+
+def test_unexpected_error_is_recorded_and_does_not_stop_the_rest(tmp_path, games, client_for, monkeypatch):
+    real = collect_ccu.fetch_ccu
+
+    def flaky(client, appid):
+        if appid == 730:
+            raise RuntimeError("boom")
+        return real(client, appid)
+
+    monkeypatch.setattr(collect_ccu, "fetch_ccu", flaky)
+    assert collect_ccu.run(client_for(ok_handler), games, tmp_path, pause=0) == 1
+    _, rows = records(tmp_path)
+    assert [(r["appid"], r["ok"]) for r in rows] == [(730, False), (570, True)]
+    assert "boom" in rows[0]["error"]

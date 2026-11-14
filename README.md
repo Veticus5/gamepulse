@@ -16,26 +16,36 @@ uv run gamepulse fivem          # łączna liczba graczy FiveM (poza Steamem)
 uv run pytest -q                # testy, bez sieci
 ```
 
-Kod wyjścia to 0, gdy udała się co najmniej jedna gra lub źródło, inaczej 1.
+Kod wyjścia: 0, gdy udała się co najmniej jedna gra lub źródło; 1, gdy żadna
+albo gdy nie da się wczytać listy gier; 2 przy błędnych argumentach.
+Jeśli ten sam kolektor już działa, drugie uruchomienie nic nie robi i kończy się kodem 0.
 
 ## Lista gier
 
-`games.toml`. Po dodaniu gry uruchom raz `uv run gamepulse news --full`,
-żeby pobrać jej historię newsów; zwykłe `news` zatrzymuje się na pierwszej
-stronie bez nowych wpisów.
+`games.toml`. Dla nowej gry zwykłe `news` samo pobierze całą historię, bo jej
+plik jest pusty. Dla gier, które już mają dane, `news` zatrzymuje się na
+pierwszej stronie bez nowych wpisów.
+
+Przerwane pobieranie newsów (błąd sieci, limit czasu) jest wznawiane przy
+następnym uruchomieniu od miejsca przerwania; pozycję trzyma
+`data/state/news/<appid>.json`. `news --full` przechodzi całą historię
+niezależnie od tego i jako jedyne znajdzie wpis dodany ze starą datą.
 
 ## Dane
 
 | Plik | Zawartość |
 |---|---|
 | `data/raw/ccu/RRRR-MM-DD.jsonl` | `ts, appid, player_count, ok, error`; jedna linia na grę i pomiar |
-| `data/raw/news/<appid>.jsonl` | surowy wpis Steam plus `fetched_at`; bez powtórzeń `gid` |
+| `data/raw/news/<appid>.jsonl` | surowy wpis Steam plus `fetched_at`; kolektor nie zapisuje drugi raz tego samego `gid` |
 | `data/raw/review_histogram/<appid>.jsonl` | `fetched_at, appid, results`; pełna migawka na każde pobranie |
 | `data/raw/fivem/RRRR-MM-DD.jsonl` | `ts, url, counts, ok, error`; jedna linia na źródło i pomiar |
 
 - Czasy są w UTC. Pliki są tylko dopisywane.
-- Linia z `ok: false` oznacza, że kolektor działał, ale źródło nie odpowiedziało.
-  Brak linii oznacza, że kolektor nie działał (np. wyłączony komputer).
+- W plikach CCU i FiveM linia z `ok: false` oznacza, że kolektor działał, ale
+  źródło nie odpowiedziało. Brak linii oznacza, że kolektor nie działał
+  (np. wyłączony komputer). Newsy i recenzje błędów nie zapisują; są w dzienniku.
+- Kolektor FiveM kończy się kodem 0, dopóki odpowiada choć jedno z dwóch źródeł,
+  także to zwracające stałą wartość. Awarię żywego źródła widać po `ok: false`.
 - Steam liczy tylko graczy ze Steama (bez Rockstar Launchera, Epic, launchera Tarkova).
 
 ## Źródła (sprawdzone 14 listopada 2026 r., bez klucza API)
@@ -52,15 +62,33 @@ Limity zapytań nie zostały sprawdzone w dokumentacji.
 ## Timery systemd (użytkownika)
 
 Pliki są w `deploy/systemd/`: CCU i FiveM co 5 minut, newsy co godzinę,
-recenzje raz dziennie. Zakładają repozytorium w `~/projects/gamepulse`
-i `uv` w `~/.local/bin`.
+recenzje raz dziennie o 12:00. Zakładają repozytorium w `~/projects/gamepulse`.
+
+- Usługi uruchamiają `.venv/bin/gamepulse`, czyli kod z bieżącego stanu
+  katalogu repozytorium. Przełączenie gałęzi zmienia to, co działa w tle.
+- Newsy i recenzje nadrabiają pominięte uruchomienie po włączeniu komputera.
+  Jeśli sieć jeszcze nie działa, próbują ponownie co 2 minuty, do 4 razy.
+- CCU i FiveM nie ponawiają; kolejny pomiar jest za 5 minut.
 
 Instalacja:
 
 ```bash
+uv sync
+```
+
+```bash
 mkdir -p ~/.config/systemd/user
+```
+
+```bash
 cp deploy/systemd/gamepulse-* ~/.config/systemd/user/
+```
+
+```bash
 systemctl --user daemon-reload
+```
+
+```bash
 systemctl --user enable --now gamepulse-ccu.timer gamepulse-fivem.timer gamepulse-news.timer gamepulse-reviews.timer
 ```
 

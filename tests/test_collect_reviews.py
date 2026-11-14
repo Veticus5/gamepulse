@@ -47,3 +47,16 @@ def test_error_on_one_game_continues(tmp_path, games, client_for):
     assert collect_reviews.run(client_for(handler), games, tmp_path, pause=0) == 1
     assert not (tmp_path / "raw" / "review_histogram" / "730.jsonl").exists()
     assert len(stored(tmp_path, 570)) == 1
+
+
+def test_unexpected_error_does_not_stop_the_rest(tmp_path, games, client_for, monkeypatch):
+    real = collect_reviews.fetch_review_histogram
+
+    def flaky(client, appid):
+        if appid == 730:
+            raise RuntimeError("boom")
+        return real(client, appid)
+
+    monkeypatch.setattr(collect_reviews, "fetch_review_histogram", flaky)
+    assert collect_reviews.run(client_for(ok_handler), games, tmp_path, pause=0) == 1
+    assert len(stored(tmp_path, 570)) == 1
