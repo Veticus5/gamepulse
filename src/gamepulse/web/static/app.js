@@ -203,9 +203,9 @@ async function renderOverview(token) {
 // ---------------------------------------------------------------- game page
 
 const CATEGORY = {
-  content_release: "Premiera lub nowa zawartość",
+  content_release: "Nowa zawartość",
   patch: "Aktualizacja",
-  announcement: "Zapowiedź",
+  announcement: "Zapowiedź i nadchodzące premiery",
   sale: "Promocja",
   free_weekend: "Darmowy dostęp",
   in_game_event: "Wydarzenie w grze",
@@ -706,9 +706,9 @@ async function renderGame(appid, rangeKey, token) {
 // ---------------------------------------------------------------- labelling page
 
 const TYPE_HINT = {
-  content_release: "Nowa grywalna zawartość już jest albo wchodzi w podanym dniu: premiera, dodatek, DLC, sezon, liga, nowa mapa lub postać.",
+  content_release: "Nowa zawartość do gry, która już wyszła: dodatek, DLC, sezon, liga, nowa mapa lub postać. Dostępna teraz albo z podanym dniem wejścia.",
   patch: "Poprawki, balans, hotfix, lista zmian, przerwa techniczna, bez dużej nowej zawartości.",
-  announcement: "Coś, co dopiero będzie: zapowiedź, harmonogram, zwiastun, nadchodzący konwent.",
+  announcement: "Wszystko o premierze samej gry (data, przedsprzedaż, dzień premiery) oraz zapowiedzi bez konkretnego dnia: zwiastun, roadmapa, „wkrótce”, nadchodzący konwent.",
   sale: "Obniżka ceny gry lub dodatków.",
   free_weekend: "Gra czasowo za darmo albo przechodzi na free-to-play.",
   in_game_event: "Wydarzenie czasowe w grze: podwójne XP, event świąteczny, tryb na ograniczony czas.",
