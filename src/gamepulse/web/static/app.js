@@ -706,15 +706,15 @@ async function renderGame(appid, rangeKey, token) {
 // ---------------------------------------------------------------- labelling page
 
 const TYPE_HINT = {
-  content_release: "Nowa zawartość do gry, która już wyszła: dodatek, DLC, sezon, liga, nowa mapa lub postać. Dostępna teraz albo z podanym dniem wejścia.",
-  patch: "Poprawki, balans, hotfix, lista zmian, przerwa techniczna, bez dużej nowej zawartości.",
-  announcement: "Wszystko o premierze samej gry (data, przedsprzedaż, dzień premiery) oraz zapowiedzi bez konkretnego dnia: zwiastun, roadmapa, „wkrótce”, nadchodzący konwent.",
-  sale: "Obniżka ceny gry lub dodatków.",
-  free_weekend: "Gra czasowo za darmo albo przechodzi na free-to-play.",
-  in_game_event: "Wydarzenie czasowe w grze: podwójne XP, event świąteczny, tryb na ograniczony czas.",
-  store_item: "Nowe skórki, paczki, mikrotransakcje, przedmioty z przepustki sprzedawane w sklepie gry.",
-  community: "Fan arty, konkursy, e-sport, turnieje, streamy, Twitch Drops, wywiady, gadżety, ankiety.",
-  other: "Nic z powyższych.",
+  content_release: "Nowa zawartość do gry, która już wyszła: dodatek, DLC, sezon, liga, mapa, postać, tryb. Dostępna teraz albo z podanym dniem. Liczy się treść, nie tytuł: „Patch Notes” wnoszące nowy sezon to też nowa zawartość.",
+  patch: "Same poprawki i strojenie: balans, błędy, hotfix, przerwa techniczna, zmiany ekonomii, zaplanowane testy systemu. Bez istotnej nowej zawartości.",
+  announcement: "Tylko dwie rzeczy: wszystko o premierze samej gry (data, przedsprzedaż, dzień premiery) oraz przyszła grywalna zawartość bez konkretnego dnia (zwiastun, roadmapa, „wkrótce”).",
+  sale: "Obniżka ceny gry lub dodatków w sklepie, za prawdziwe pieniądze. Zniżki i bonusy wewnątrz gry to wydarzenie w grze.",
+  free_weekend: "Cała gra czasowo za darmo albo przejście na free-to-play.",
+  in_game_event: "Wydarzenie czasowe w grze: bonusy, podwójne XP, tygodniowe premie i zniżki w grze, event świąteczny, tryb na ograniczony czas, darmowy przedmiot do odebrania.",
+  store_item: "Rzeczy do kupienia: skórki, paczki, kolekcje, przepustki premium, płatne edycje, mikrotransakcje. Jeśli płatna rzecz to głównie nowa grywalna zawartość, wybierz nową zawartość.",
+  community: "O społeczności i dla niej: fan arty, konkursy, e-sport, turnieje, streamy i ich podsumowania, Twitch Drops, wywiady, odznaki dla graczy, gadżety, ankiety, regulaminy i kary.",
+  other: "Wieści ze studia bez niczego do grania, kupienia czy obejrzenia: kamienie milowe sprzedaży i wishlist, rocznice, podziękowania. Oraz wszystko, co nie pasuje wyżej.",
 };
 
 let labelKeys = null;
