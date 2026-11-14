@@ -12,12 +12,16 @@ import duckdb
 
 from gamepulse.config import Game
 from gamepulse.storage import read_jsonl
+from gamepulse.web.events import classify
 
 MINUTE = 60_000
 HOUR = 60 * MINUTE
 DAY = 24 * HOUR
 
-RANGES = {"24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY, "1y": 365 * DAY, "all": None}
+# Ranges of the player chart; "all" means since the first measurement.
+RANGES = {"24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY, "all": None}
+HIGHLIGHT_WINDOW = 90 * DAY
+NEWS_KINDS = ("official", "external", "all")
 FIVEM_LIVE_SOURCE = "https://static.cfx.re/runtime/counts.json"
 # A collector run is expected every 5 minutes; anything longer than this
 # between two runs counts as a gap (the computer was off, or Steam was down).
@@ -104,16 +108,17 @@ class Store:
                 "news",
                 files,
                 "gid VARCHAR, appid BIGINT, title VARCHAR, date_ms BIGINT, feedlabel VARCHAR, "
-                "feed_type BIGINT, url VARCHAR, author VARCHAR, contents VARCHAR",
+                "feed_type BIGINT, url VARCHAR, author VARCHAR, contents VARCHAR, tags VARCHAR[]",
                 """
                 SELECT gid, any_value(appid) AS appid, any_value(title) AS title,
                        any_value(date) * 1000 AS date_ms, any_value(feedlabel) AS feedlabel,
                        any_value(feed_type) AS feed_type, any_value(url) AS url,
-                       any_value(author) AS author, any_value(contents) AS contents
+                       any_value(author) AS author, any_value(contents) AS contents,
+                       any_value(tags) AS tags
                 FROM read_json({files}, format='newline_delimited', ignore_errors=true,
                      columns={{gid:'VARCHAR', appid:'BIGINT', title:'VARCHAR', date:'BIGINT',
                               feedlabel:'VARCHAR', feed_type:'BIGINT', url:'VARCHAR',
-                              author:'VARCHAR', contents:'VARCHAR'}})
+                              author:'VARCHAR', contents:'VARCHAR', tags:'VARCHAR[]'}})
                 WHERE gid IS NOT NULL AND date IS NOT NULL AND appid IS NOT NULL
                 GROUP BY gid
                 """,
@@ -259,21 +264,35 @@ class Store:
                 },
             }
 
+    @staticmethod
+    def _news_dict(gid, title, date, feed_type, feedlabel, url, tags) -> dict:
+        official = feed_type == 1
+        category, priority = classify(title, official, tags)
+        return {
+            "gid": gid,
+            "title": title,
+            "date_ms": date,
+            "official": official,
+            "feedlabel": feedlabel,
+            "url": url,
+            "category": category,
+            "priority": priority,
+        }
+
     def game(self, appid: int, range_key: str, now_ms: int) -> dict | None:
         if appid not in self._by_appid or range_key not in RANGES:
             return None
         with self._lock:
             self._refresh()
+            first_ccu, last_ccu = self._rows(
+                "SELECT min(ts_ms), max(ts_ms) FROM ccu WHERE appid = ?", [appid]
+            )[0]
             span = RANGES[range_key]
-            results = self._reviews.get(appid, {})
-            if span is None:
-                starts = [r["date"] * 1000 for r in results.get("rollups") or [] if "date" in r]
-                first_ccu = self._rows("SELECT min(ts_ms) FROM ccu WHERE appid = ?", [appid])[0][0]
-                first_news = self._rows("SELECT min(date_ms) FROM news WHERE appid = ?", [appid])[0][0]
-                candidates = [v for v in (*starts, first_ccu, first_news) if v is not None]
-                since = min(candidates) if candidates else now_ms - 30 * DAY
-            else:
-                since = now_ms - span
+            since = now_ms - span if span is not None else (first_ccu or now_ms - 7 * DAY)
+            # Never stretch the axis over time with no measurements: Steam has
+            # no history, so everything before the first run would be empty.
+            if first_ccu is not None and since < first_ccu:
+                since = first_ccu
 
             bucket = _bucket_for(now_ms - since)
             if bucket is None:
@@ -287,51 +306,113 @@ class Store:
                     "WHERE appid = ? AND ts_ms >= ? GROUP BY b ORDER BY b",
                     [bucket, appid, since],
                 )
-            news = self._rows(
-                "SELECT gid, title, date_ms, feed_type, feedlabel, url FROM news "
-                "WHERE appid = ? AND date_ms >= ? ORDER BY date_ms DESC",
-                [appid, since],
-            )
-            # Daily counts exist only for the last 30 days; older history is monthly.
-            daily = span is not None and span <= 30 * DAY
-            source = results.get("recent") if daily else results.get("rollups")
-            reviews = [
-                [r["date"] * 1000, int(r.get("recommendations_up") or 0), int(r.get("recommendations_down") or 0)]
-                for r in source or []
-                if isinstance(r.get("date"), int) and r["date"] * 1000 >= (since if daily else since - 31 * DAY)
+            peak_24h = self._rows(
+                "SELECT max(player_count) FROM ccu WHERE appid = ? AND ts_ms >= ?",
+                [appid, (last_ccu or now_ms) - DAY],
+            )[0][0]
+
+            columns = "gid, title, date_ms, feed_type, feedlabel, url, tags"
+            in_range = [
+                self._news_dict(*row)
+                for row in self._rows(
+                    f"SELECT {columns} FROM news WHERE appid = ? AND feed_type = 1 "
+                    "AND date_ms >= ? AND date_ms <= ? ORDER BY date_ms",
+                    [appid, since, now_ms],
+                )
             ]
+            # One marker per day, however many items that day has.
+            days: dict[int, list[dict]] = {}
+            for item in in_range:
+                days.setdefault(item["date_ms"] - item["date_ms"] % DAY, []).append(item)
+            markers = []
+            for day, items in sorted(days.items()):
+                items.sort(key=lambda n: (-n["priority"], -n["date_ms"]))
+                markers.append(
+                    {
+                        "day_ms": day,
+                        "at_ms": items[0]["date_ms"],
+                        "count": len(items),
+                        "priority": items[0]["priority"],
+                        "items": items[:8],
+                    }
+                )
+
+            recent = [
+                self._news_dict(*row)
+                for row in self._rows(
+                    f"SELECT {columns} FROM news WHERE appid = ? AND feed_type = 1 AND date_ms >= ?",
+                    [appid, now_ms - HIGHLIGHT_WINDOW],
+                )
+            ]
+            recent.sort(key=lambda n: (-n["priority"], -n["date_ms"]))
+            highlights = sorted(recent[:5], key=lambda n: -n["date_ms"])
+            totals = dict(
+                self._rows(
+                    "SELECT feed_type = 1, count(*) FROM news WHERE appid = ? GROUP BY 1", [appid]
+                )
+            )
+
+            results = self._reviews.get(appid, {})
+
+            def review_points(rows):
+                return [
+                    [r["date"] * 1000, int(r.get("recommendations_up") or 0), int(r.get("recommendations_down") or 0)]
+                    for r in rows or []
+                    if isinstance(r.get("date"), int)
+                ]
+
             return {
                 "meta": self._meta_for(appid),
                 "range": {"key": range_key, "from": since, "to": now_ms},
                 "ccu": [[int(t), int(v)] for t, v in ccu],
                 "ccu_bucket_ms": bucket,
-                "reviews": {"granularity": "day" if daily else "month", "points": reviews},
+                "ccu_first_ts": first_ccu,
+                "peak_24h": peak_24h,
+                "markers": markers,
+                "highlights": highlights,
+                "news_totals": {"official": totals.get(True, 0), "external": totals.get(False, 0)},
+                "reviews": {
+                    "daily": review_points(results.get("recent")),
+                    "monthly": review_points(results.get("rollups")),
+                },
                 "review_summary": self._review_summary(appid),
-                "news": [
-                    {
-                        "gid": gid,
-                        "title": title,
-                        "date_ms": date,
-                        "official": feed_type == 1,
-                        "feedlabel": feedlabel,
-                        "url": url,
-                    }
-                    for gid, title, date, feed_type, feedlabel, url in news
-                ],
             }
+
+    def news_list(self, appid: int, kind: str, query: str, offset: int, limit: int) -> dict | None:
+        if appid not in self._by_appid or kind not in NEWS_KINDS:
+            return None
+        where = ["appid = ?"]
+        params: list = [appid]
+        if kind != "all":
+            where.append("feed_type = 1" if kind == "official" else "feed_type <> 1")
+        if query.strip():
+            where.append("title ILIKE ? ESCAPE '\\'")
+            escaped = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            params.append(f"%{escaped}%")
+        clause = " AND ".join(where)
+        with self._lock:
+            self._refresh()
+            total = self._rows(f"SELECT count(*) FROM news WHERE {clause}", params)[0][0]
+            rows = self._rows(
+                f"SELECT gid, title, date_ms, feed_type, feedlabel, url, tags FROM news WHERE {clause} "
+                "ORDER BY date_ms DESC, gid LIMIT ? OFFSET ?",
+                [*params, limit, offset],
+            )
+        return {"total": total, "items": [self._news_dict(*row) for row in rows]}
 
     def news_item(self, appid: int, gid: str) -> dict | None:
         with self._lock:
             self._refresh()
             rows = self._rows(
-                "SELECT title, date_ms, feed_type, feedlabel, url, author, contents FROM news "
+                "SELECT title, date_ms, feed_type, feedlabel, url, author, contents, tags FROM news "
                 "WHERE appid = ? AND gid = ?",
                 [appid, gid],
             )
         if not rows:
             return None
-        title, date, feed_type, feedlabel, url, author, contents = rows[0]
+        title, date, feed_type, feedlabel, url, author, contents, tags = rows[0]
         return {
+            "category": classify(title, feed_type == 1, tags)[0],
             "gid": gid,
             "title": title,
             "date_ms": date,

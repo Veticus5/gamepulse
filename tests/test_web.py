@@ -96,25 +96,77 @@ def test_overview_status_counts_gaps_and_fivem(data_dir):
     assert result["fivem"]["players"] == 257625
 
 
-def test_game_range_filters_news_and_picks_review_granularity(data_dir):
+def test_game_range_never_starts_before_first_measurement(data_dir):
     store = Store(data_dir, GAMES)
-    month = store.game(730, "30d", NOW)
-    assert [n["gid"] for n in month["news"]] == ["b", "a"]
-    assert month["news"][1]["official"] is True and month["news"][0]["official"] is False
-    assert month["reviews"]["granularity"] == "day"
-    assert month["reviews"]["points"] == [[(NOW - 3 * DAY) // 1000 * 1000, 3, 1]]
-    assert month["ccu_bucket_ms"] == HOUR
-    everything = store.game(730, "all", NOW)
-    assert [n["gid"] for n in everything["news"]] == ["b", "a", "old"]
-    assert everything["reviews"]["granularity"] == "month"
-    assert len(everything["reviews"]["points"]) == 1
+    first = NOW - (25 * 12 - 1) * 5 * MINUTE
+    first -= first % 1000
+    for key in ("7d", "30d", "all"):
+        result = store.game(730, key, NOW)
+        assert result["range"]["from"] == first
+        assert result["ccu_first_ts"] == first
+    assert store.game(730, "24h", NOW)["range"]["from"] == NOW - DAY
 
 
-def test_game_24h_returns_raw_points(data_dir):
+def test_game_24h_returns_raw_points_and_peak(data_dir):
     day = Store(data_dir, GAMES).game(730, "24h", NOW)
     assert day["ccu_bucket_ms"] is None
     assert day["ccu"][-1] == [NOW - NOW % 1000, 1299]
     assert all(a[0] < b[0] for a, b in zip(day["ccu"], day["ccu"][1:]))
+    assert day["peak_24h"] == 1299
+
+
+def test_game_markers_one_per_day_official_only(data_dir):
+    append_jsonl(
+        data_dir / "raw" / "news" / "730.jsonl",
+        [
+            {"gid": "m1", "appid": 730, "title": "Fan Art Winners", "date": (NOW - 3 * HOUR) // 1000, "feed_type": 1},
+            {"gid": "m2", "appid": 730, "title": "Season 5 is Now Available", "date": (NOW - 2 * HOUR) // 1000, "feed_type": 1},
+            {"gid": "m3", "appid": 730, "title": "Press piece", "date": (NOW - 1 * HOUR) // 1000, "feed_type": 0},
+        ],
+    )
+    result = Store(data_dir, GAMES).game(730, "24h", NOW)
+    assert len(result["markers"]) == 1
+    marker = result["markers"][0]
+    assert marker["count"] == 2
+    assert marker["priority"] == 3
+    assert [i["gid"] for i in marker["items"]] == ["m2", "m1"]
+    assert marker["at_ms"] == (NOW - 2 * HOUR) // 1000 * 1000
+
+
+def test_game_highlights_prefer_important_recent_official_news(data_dir):
+    rows = [
+        {"gid": f"c{i}", "appid": 730, "title": f"Fan Art Showcase #{i}", "date": (NOW - i * DAY) // 1000, "feed_type": 1}
+        for i in range(1, 9)
+    ]
+    rows.append({"gid": "big", "appid": 730, "title": "Operation X is Now Available", "date": (NOW - 60 * DAY) // 1000, "feed_type": 1})
+    rows.append({"gid": "ancient", "appid": 730, "title": "Old Launch is Now Available", "date": (NOW - 200 * DAY) // 1000, "feed_type": 1})
+    append_jsonl(data_dir / "raw" / "news" / "730.jsonl", rows)
+    result = Store(data_dir, GAMES).game(730, "7d", NOW)
+    gids = [h["gid"] for h in result["highlights"]]
+    assert len(gids) == 5
+    assert "big" in gids and "a" in gids  # the launch and the patch beat fan art
+    assert "ancient" not in gids and "b" not in gids  # too old; not from the developer
+    assert gids == sorted(gids, key=lambda g: -next(h["date_ms"] for h in result["highlights"] if h["gid"] == g))
+    assert result["news_totals"] == {"official": 12, "external": 1}
+
+
+def test_game_reviews_carry_both_granularities(data_dir):
+    reviews = Store(data_dir, GAMES).game(730, "7d", NOW)["reviews"]
+    assert reviews["daily"] == [[(NOW - 3 * DAY) // 1000 * 1000, 3, 1]]
+    assert reviews["monthly"] == [[(NOW - 400 * DAY) // 1000 * 1000, 90, 10]]
+
+
+def test_news_list_filters_searches_and_pages(data_dir):
+    store = Store(data_dir, GAMES)
+    assert [n["gid"] for n in store.news_list(730, "official", "", 0, 50)["items"]] == ["a", "old"]
+    assert [n["gid"] for n in store.news_list(730, "external", "", 0, 50)["items"]] == ["b"]
+    everything = store.news_list(730, "all", "", 0, 2)
+    assert everything["total"] == 3 and [n["gid"] for n in everything["items"]] == ["b", "a"]
+    assert [n["gid"] for n in store.news_list(730, "all", "", 2, 2)["items"]] == ["old"]
+    assert [n["gid"] for n in store.news_list(730, "all", "PAT", 0, 50)["items"]] == ["a"]
+    assert store.news_list(730, "all", "%", 0, 50)["total"] == 0  # a literal percent sign, not a wildcard
+    assert store.news_list(730, "bogus", "", 0, 50) is None
+    assert store.news_list(1, "all", "", 0, 50) is None
 
 
 def test_store_picks_up_new_measurements(data_dir):
@@ -142,6 +194,10 @@ def test_api_endpoints(data_dir):
     assert client.get("/api/games/1").status_code == 404
     item = client.get("/api/games/730/news/a").json()
     assert item["contents"] == "notes more"
+    assert item["category"] == "update"
+    assert client.get("/api/games/730/news?kind=all&q=press").json()["total"] == 1
+    assert client.get("/api/games/730/news?kind=bogus").status_code == 400
+    assert client.get("/api/games/730/news?limit=9999").status_code == 422
     assert client.get("/api/games/730/news/zzz").status_code == 404
     assert client.get("/api/games/570/news/a").status_code == 404
     assert client.get("/").status_code == 200

@@ -3,12 +3,12 @@
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from gamepulse.config import Game
-from gamepulse.web.store import RANGES, Store
+from gamepulse.web.store import NEWS_KINDS, RANGES, Store
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -22,10 +22,25 @@ def create_app(data_dir: Path, games: list[Game]) -> FastAPI:
         return store.overview()
 
     @app.get("/api/games/{appid}")
-    def game(appid: int, range: str = "30d") -> dict:
+    def game(appid: int, range: str = "7d") -> dict:
         if range not in RANGES:
             raise HTTPException(400, f"range must be one of {', '.join(RANGES)}")
         result = store.game(appid, range, int(time.time() * 1000))
+        if result is None:
+            raise HTTPException(404, "game is not tracked")
+        return result
+
+    @app.get("/api/games/{appid}/news")
+    def news_list(
+        appid: int,
+        kind: str = "official",
+        q: str = Query("", max_length=100),
+        offset: int = Query(0, ge=0),
+        limit: int = Query(50, ge=1, le=200),
+    ) -> dict:
+        if kind not in NEWS_KINDS:
+            raise HTTPException(400, f"kind must be one of {', '.join(NEWS_KINDS)}")
+        result = store.news_list(appid, kind, q, offset, limit)
         if result is None:
             raise HTTPException(404, "game is not tracked")
         return result

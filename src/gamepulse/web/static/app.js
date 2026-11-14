@@ -13,10 +13,10 @@ const dayMonthFmt = new Intl.DateTimeFormat("pl-PL", { day: "numeric", month: "s
 const monthYearFmt = new Intl.DateTimeFormat("pl-PL", { month: "short", year: "numeric" });
 const timeFmt = new Intl.DateTimeFormat("pl-PL", { hour: "2-digit", minute: "2-digit" });
 
-const RANGES = [["24h", "24 h"], ["7d", "7 dni"], ["30d", "30 dni"], ["1y", "Rok"], ["all", "Całość"]];
-const COLORS = { accent: "#5aa9ff", up: "#4ec98a", down: "#f0685f", muted: "#8b95a3", line: "#2a313b", text: "#e6e9ee" };
+const RANGES = [["24h", "24 h"], ["7d", "7 dni"], ["30d", "30 dni"], ["all", "Od początku pomiarów"]];
+const COLORS = { accent: "#5aa9ff", up: "#4ec98a", down: "#f0685f", muted: "#8b95a3", line: "#2a313b", text: "#e6e9ee", event: "#f0a23b" };
 
-let chart = null;
+let charts = [];
 let refreshTimer = null;
 let renderToken = 0;
 
@@ -202,6 +202,15 @@ async function renderOverview(token) {
 
 // ---------------------------------------------------------------- game page
 
+const CATEGORY = {
+  release: "Premiera lub nowa zawartość",
+  update: "Aktualizacja",
+  announcement: "Zapowiedź",
+  sale: "Promocja",
+  community: "Społeczność",
+  other: "Inne",
+};
+
 function statCard(label, value, sub) {
   return el("div", { class: "stat" },
     el("div", { class: "label" }, label),
@@ -215,168 +224,82 @@ function reviewSub(summary) {
     : "brak recenzji";
 }
 
-async function openNews(appid, gid) {
+function badge(item) {
+  return el("span", { class: `badge cat-${item.category}${item.priority >= 3 ? " strong" : ""}` },
+    item.official ? CATEGORY[item.category] : "Zewnętrzny");
+}
+
+function openDrawer(...nodes) {
   drawer.hidden = false;
-  drawerBody.replaceChildren(el("p", { class: "muted" }, "Wczytywanie…"));
+  drawerBody.replaceChildren(...nodes);
+}
+
+async function openNews(appid, gid, back) {
+  openDrawer(el("p", { class: "muted" }, "Wczytywanie…"));
   try {
     const item = await api(`/api/games/${appid}/news/${encodeURIComponent(gid)}`);
     const link = safeUrl(item.url);
-    drawerBody.replaceChildren(
+    openDrawer(
+      back ? el("button", { class: "link", onclick: back }, "← Wydarzenia z tego dnia") : null,
       el("h3", {}, item.title || "(bez tytułu)"),
       el("div", { class: "meta" },
-        `${dateTimeFmt.format(item.date_ms)} · ${item.official ? "oficjalny" : "zewnętrzny"} · ${item.feedlabel || ""}`,
+        `${dateTimeFmt.format(item.date_ms)} · ${item.official ? CATEGORY[item.category] : "zewnętrzny"} · ${item.feedlabel || ""}`,
         link ? [" · ", el("a", { href: link, target: "_blank", rel: "noopener noreferrer" }, "źródło")] : null),
       el("div", { class: "body" }, plainText(item.contents) || "Brak treści."),
     );
   } catch (error) {
-    drawerBody.replaceChildren(el("p", { class: "muted" }, "Nie udało się wczytać newsa."));
+    openDrawer(el("p", { class: "muted" }, "Nie udało się wczytać newsa."));
   }
 }
 
-function drawChart(container, data, appid) {
-  if (chart) chart.dispose();
-  chart = echarts.init(container, null, { renderer: "canvas" });
-  const { from, to } = data.range;
-  const official = data.news.filter((n) => n.official).map((n) => [n.date_ms, 1, n.title, n.gid]);
-  const external = data.news.filter((n) => !n.official).map((n) => [n.date_ms, 0, n.title, n.gid]);
-  const up = data.reviews.points.map(([t, u]) => [t, u]);
-  const down = data.reviews.points.map(([t, , d]) => [t, -d]);
-  // The visible span decides the label: hours, days, or months and years.
-  const axisDate = (value) => {
-    const zoom = chart.getOption().dataZoom[0];
-    const span = (to - from) * ((zoom.end - zoom.start) / 100);
-    if (span <= 2 * 86400000) return timeFmt.format(value);
-    if (span <= 120 * 86400000) return dayMonthFmt.format(value);
-    return monthYearFmt.format(value);
-  };
-  const axis = (gridIndex, showLabels) => ({
+function openDay(appid, marker) {
+  const reopen = () => openDay(appid, marker);
+  openDrawer(
+    el("h3", {}, `Wydarzenia z ${dateFmt.format(marker.at_ms)}`),
+    el("div", { class: "meta" }, marker.count === 1 ? "1 oficjalny news" : `${marker.count} oficjalnych newsów`),
+    el("ul", { class: "events" }, marker.items.map((item) =>
+      el("li", {}, el("button", { onclick: () => openNews(appid, item.gid, reopen) },
+        el("span", { class: "title" }, item.title || "(bez tytułu)"),
+        el("span", { class: "sub" }, badge(item), timeFmt.format(item.date_ms)))))),
+    marker.count > marker.items.length
+      ? el("p", { class: "muted" }, `Pokazano ${marker.items.length} najważniejszych z ${marker.count}.`) : null,
+  );
+}
+
+function baseAxis(extra = {}) {
+  return {
     type: "time",
-    gridIndex,
-    min: from,
-    max: to,
     axisLine: { lineStyle: { color: COLORS.line } },
-    axisLabel: { show: showLabels, color: COLORS.muted, hideOverlap: true, formatter: axisDate },
-    axisTick: { show: showLabels },
+    axisLabel: { color: COLORS.muted, hideOverlap: true },
     splitLine: { show: false },
-    axisPointer: { label: { show: gridIndex === 2 } },
-  });
-  const valueAxis = (gridIndex, name, extra = {}) => ({
+    ...extra,
+  };
+}
+
+function valueAxis(extra = {}) {
+  return {
     type: "value",
-    gridIndex,
-    name,
-    nameTextStyle: { color: COLORS.muted, align: "left" },
     axisLabel: { color: COLORS.muted, formatter: (v) => nf.format(Math.abs(v)) },
     splitLine: { lineStyle: { color: COLORS.line, type: "dashed" } },
     ...extra,
-  });
-  const barWidth = data.reviews.granularity === "day" ? "55%" : "70%";
-
-  chart.setOption({
-    backgroundColor: "transparent",
-    textStyle: { color: COLORS.text, fontFamily: "system-ui, sans-serif" },
-    animation: false,
-    grid: [
-      { left: 64, right: 24, top: 30, height: "44%" },
-      { left: 64, right: 24, top: "58%", height: 34 },
-      { left: 64, right: 24, top: "71%", bottom: 34 },
-    ],
-    xAxis: [axis(0, false), axis(1, false), axis(2, true)],
-    yAxis: [
-      valueAxis(0, "Gracze", { scale: true }),
-      { type: "value", gridIndex: 1, min: -0.6, max: 1.6, show: false },
-      valueAxis(2, data.reviews.granularity === "day" ? "Recenzje dziennie" : "Recenzje miesięcznie"),
-    ],
-    axisPointer: { link: [{ xAxisIndex: "all" }], lineStyle: { color: COLORS.muted } },
-    dataZoom: [{ type: "inside", xAxisIndex: [0, 1, 2], filterMode: "none" }],
-    tooltip: {
-      trigger: "axis",
-      backgroundColor: "#1e242c",
-      borderColor: COLORS.line,
-      textStyle: { color: COLORS.text, fontSize: 13 },
-      formatter(params) {
-        const items = Array.isArray(params) ? params : [params];
-        if (!items.length) return "";
-        const box = document.createElement("div");
-        const header = document.createElement("div");
-        header.style.color = COLORS.muted;
-        header.textContent = dateTimeFmt.format(items[0].value[0]);
-        box.append(header);
-        let upValue = null;
-        let downValue = null;
-        for (const item of items) {
-          const row = document.createElement("div");
-          if (item.seriesName === "Gracze") row.textContent = `Gracze: ${nf.format(item.value[1])}`;
-          else if (item.seriesName === "Pozytywne") { upValue = item.value[1]; continue; }
-          else if (item.seriesName === "Negatywne") { downValue = -item.value[1]; continue; }
-          else continue;
-          box.append(row);
-        }
-        if (upValue !== null || downValue !== null) {
-          const u = upValue || 0;
-          const d = downValue || 0;
-          const row = document.createElement("div");
-          row.textContent = `Recenzje: ${nf.format(u)} 👍 / ${nf.format(d)} 👎` + (u + d ? ` (${Math.round((100 * u) / (u + d))}%)` : "");
-          box.append(row);
-        }
-        return box;
-      },
-    },
-    series: [
-      {
-        name: "Gracze",
-        type: "line",
-        xAxisIndex: 0,
-        yAxisIndex: 0,
-        data: data.ccu,
-        showSymbol: data.ccu.length < 3,
-        symbolSize: 5,
-        lineStyle: { color: COLORS.accent, width: 1.6 },
-        itemStyle: { color: COLORS.accent },
-        areaStyle: { color: "rgba(90,169,255,0.10)" },
-        // A missing stretch (computer off) must show as a gap, not a straight line.
-        connectNulls: false,
-      },
-      {
-        name: "Oficjalne",
-        type: "scatter",
-        xAxisIndex: 1,
-        yAxisIndex: 1,
-        data: official,
-        symbolSize: 9,
-        itemStyle: { color: COLORS.accent, opacity: 0.9 },
-        tooltip: { trigger: "item", formatter: (p) => tooltipForNews(p) },
-        cursor: "pointer",
-      },
-      {
-        name: "Zewnętrzne",
-        type: "scatter",
-        xAxisIndex: 1,
-        yAxisIndex: 1,
-        data: external,
-        symbolSize: 6,
-        itemStyle: { color: COLORS.muted, opacity: 0.55 },
-        tooltip: { trigger: "item", formatter: (p) => tooltipForNews(p) },
-        cursor: "pointer",
-      },
-      { name: "Pozytywne", type: "bar", stack: "reviews", xAxisIndex: 2, yAxisIndex: 2, data: up, barWidth, itemStyle: { color: COLORS.up } },
-      { name: "Negatywne", type: "bar", stack: "reviews", xAxisIndex: 2, yAxisIndex: 2, data: down, barWidth, itemStyle: { color: COLORS.down } },
-    ],
-  });
-  chart.on("click", (params) => {
-    if (params.seriesName === "Oficjalne" || params.seriesName === "Zewnętrzne") openNews(appid, params.value[3]);
-  });
+  };
 }
 
-function tooltipForNews(params) {
+const TOOLTIP = { backgroundColor: "#1e242c", borderColor: COLORS.line, textStyle: { color: COLORS.text, fontSize: 13 } };
+
+function tipBox(header, ...lines) {
   const box = document.createElement("div");
   box.style.maxWidth = "320px";
   box.style.whiteSpace = "normal";
-  const date = document.createElement("div");
-  date.style.color = COLORS.muted;
-  date.textContent = `${dateTimeFmt.format(params.value[0])} · ${params.seriesName.toLowerCase()}`;
-  const title = document.createElement("div");
-  title.textContent = params.value[2] || "(bez tytułu)";
-  box.append(date, title);
+  const head = document.createElement("div");
+  head.style.color = COLORS.muted;
+  head.textContent = header;
+  box.append(head);
+  for (const line of lines) {
+    const row = document.createElement("div");
+    row.textContent = line;
+    box.append(row);
+  }
   return box;
 }
 
@@ -391,6 +314,173 @@ function withGaps(points, bucketMs) {
   return out;
 }
 
+function drawPlayers(container, data, appid, showMarkers) {
+  const instance = echarts.init(container);
+  const { from, to } = data.range;
+  const span = to - from;
+  const label = (value) => (span <= 2 * 86400000 ? timeFmt.format(value) : dayMonthFmt.format(value));
+  const line = withGaps(data.ccu, data.ccu_bucket_ms);
+  const values = data.ccu.map((p) => p[1]);
+  const reach = (data.ccu_bucket_ms || 5 * 60000) * 3;
+  // A marker sits on the line when there is a measurement close to it,
+  // otherwise at the bottom of the chart.
+  const markers = (showMarkers ? data.markers : []).map((marker) => {
+    let best = null;
+    for (const [t, v] of data.ccu) {
+      if (best === null || Math.abs(t - marker.at_ms) < Math.abs(best[0] - marker.at_ms)) best = [t, v];
+    }
+    const onLine = best && Math.abs(best[0] - marker.at_ms) <= reach;
+    return { value: [marker.at_ms, onLine ? best[1] : null], marker, onLine };
+  });
+  const important = (m) => m.marker.priority >= 2;
+  const markerSeries = (name, items, yAxisIndex) => ({
+    name,
+    type: "scatter",
+    yAxisIndex,
+    data: items.map((m) => ({
+      value: yAxisIndex === 0 ? m.value : [m.value[0], 0.04],
+      marker: m.marker,
+      symbolSize: important(m) ? 13 : 9,
+      itemStyle: { color: important(m) ? COLORS.event : COLORS.muted, borderColor: "#0f1216", borderWidth: 2 },
+    })),
+    z: 5,
+    cursor: "pointer",
+    tooltip: {
+      trigger: "item",
+      formatter: (p) => tipBox(
+        dateFmt.format(p.data.marker.at_ms),
+        ...p.data.marker.items.slice(0, 3).map((i) => `• ${i.title || "(bez tytułu)"}`),
+        p.data.marker.count > 3 ? `i ${p.data.marker.count - 3} więcej` : "Kliknij, żeby przeczytać"),
+    },
+  });
+
+  instance.setOption({
+    backgroundColor: "transparent",
+    textStyle: { color: COLORS.text, fontFamily: "system-ui, sans-serif" },
+    animation: false,
+    grid: { left: 70, right: 24, top: 16, bottom: 34 },
+    xAxis: baseAxis({ min: from, max: to, axisLabel: { color: COLORS.muted, hideOverlap: true, formatter: label } }),
+    yAxis: [valueAxis({ scale: true }), { type: "value", min: 0, max: 1, show: false }],
+    dataZoom: [{ type: "inside", filterMode: "none" }],
+    tooltip: {
+      ...TOOLTIP,
+      trigger: "axis",
+      axisPointer: { lineStyle: { color: COLORS.muted } },
+      formatter(params) {
+        const point = (Array.isArray(params) ? params : [params]).find((p) => p.seriesName === "Gracze" && p.value[1] !== null);
+        return point ? tipBox(dateTimeFmt.format(point.value[0]), `Gracze: ${nf.format(point.value[1])}`) : "";
+      },
+    },
+    graphic: values.length < 2 ? [{
+      type: "text", left: "center", top: "middle",
+      style: { text: values.length ? "Za mało pomiarów w tym okresie, żeby narysować wykres" : "Brak pomiarów w tym okresie", fill: COLORS.muted, fontSize: 14 },
+    }] : [],
+    series: [
+      {
+        name: "Gracze",
+        type: "line",
+        data: line,
+        showSymbol: values.length < 3,
+        symbolSize: 5,
+        lineStyle: { color: COLORS.accent, width: 2 },
+        itemStyle: { color: COLORS.accent },
+        areaStyle: { color: "rgba(90,169,255,0.10)" },
+        connectNulls: false,
+      },
+      markerSeries("Wydarzenia", markers.filter((m) => m.onLine), 0),
+      markerSeries("Wydarzenia poza pomiarami", markers.filter((m) => !m.onLine), 1),
+    ],
+  });
+  instance.on("click", (params) => { if (params.data && params.data.marker) openDay(appid, params.data.marker); });
+  return instance;
+}
+
+function drawReviews(container, points, granularity) {
+  const instance = echarts.init(container);
+  const label = granularity === "day" ? dayMonthFmt : monthYearFmt;
+  instance.setOption({
+    backgroundColor: "transparent",
+    textStyle: { color: COLORS.text, fontFamily: "system-ui, sans-serif" },
+    animation: false,
+    grid: { left: 70, right: 24, top: 16, bottom: 34 },
+    xAxis: baseAxis({ axisLabel: { color: COLORS.muted, hideOverlap: true, formatter: (v) => label.format(v) } }),
+    yAxis: valueAxis(),
+    dataZoom: [{ type: "inside", filterMode: "none" }],
+    tooltip: {
+      ...TOOLTIP,
+      trigger: "axis",
+      axisPointer: { type: "shadow" },
+      formatter(params) {
+        const items = Array.isArray(params) ? params : [params];
+        if (!items.length) return "";
+        const up = (items.find((p) => p.seriesName === "Pozytywne") || { value: [0, 0] }).value[1];
+        const down = -(items.find((p) => p.seriesName === "Negatywne") || { value: [0, 0] }).value[1];
+        return tipBox(label.format(items[0].value[0]),
+          `Pozytywne: ${nf.format(up)}`, `Negatywne: ${nf.format(down)}`,
+          up + down ? `Odsetek pozytywnych: ${Math.round((100 * up) / (up + down))}%` : "Brak recenzji");
+      },
+    },
+    graphic: points.length ? [] : [{ type: "text", left: "center", top: "middle", style: { text: "Brak danych o recenzjach", fill: COLORS.muted, fontSize: 14 } }],
+    series: [
+      { name: "Pozytywne", type: "bar", stack: "r", data: points.map(([t, u]) => [t, u]), barMaxWidth: 18, itemStyle: { color: COLORS.up } },
+      { name: "Negatywne", type: "bar", stack: "r", data: points.map(([t, , d]) => [t, -d]), barMaxWidth: 18, itemStyle: { color: COLORS.down } },
+    ],
+  });
+  return instance;
+}
+
+function newsRow(appid, item) {
+  return el("li", {}, el("button", { onclick: () => openNews(appid, item.gid) },
+    el("span", { class: "date" }, dateFmt.format(item.date_ms)),
+    el("span", { class: "title" }, item.title || "(bez tytułu)"),
+    badge(item)));
+}
+
+/** The full archive: search, kind filter and paging, loaded only on demand. */
+function newsArchive(appid, totals) {
+  const state = { kind: "official", q: "", items: [], total: 0, loading: false };
+  const list = el("ul", { class: "news-list" });
+  const count = el("span", { class: "muted" });
+  const more = el("button", { class: "chip", onclick: () => load(false) }, "Pokaż więcej");
+  const chips = el("div", { class: "chips" });
+  const search = el("input", { class: "search", type: "search", placeholder: "Szukaj w tytułach", "aria-label": "Szukaj w tytułach newsów" });
+  let timer = null;
+  search.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { state.q = search.value; load(true); }, 250);
+  });
+
+  function paint() {
+    chips.replaceChildren(...[["official", `Oficjalne (${nf.format(totals.official)})`], ["external", `Zewnętrzne (${nf.format(totals.external)})`], ["all", "Wszystkie"]].map(([key, label]) =>
+      el("button", { class: `chip ${state.kind === key ? "active" : ""}`, onclick: () => { state.kind = key; load(true); } }, label)));
+    count.textContent = `${nf.format(state.items.length)} z ${nf.format(state.total)}`;
+    list.replaceChildren(...(state.items.length ? state.items.map((n) => newsRow(appid, n)) : [el("li", { class: "empty" }, state.loading ? "Wczytywanie…" : "Nic nie znaleziono.")]));
+    more.hidden = state.items.length >= state.total;
+  }
+
+  async function load(reset) {
+    if (reset) { state.items = []; state.total = 0; }
+    state.loading = true;
+    paint();
+    const params = new URLSearchParams({ kind: state.kind, q: state.q, offset: state.items.length, limit: 50 });
+    try {
+      const page = await api(`/api/games/${appid}/news?${params}`);
+      state.items = state.items.concat(page.items);
+      state.total = page.total;
+    } catch (error) {
+      console.error(error);
+    }
+    state.loading = false;
+    paint();
+  }
+
+  load(true);
+  return el("div", { class: "archive" },
+    el("div", { class: "panel-head" }, search, chips, count),
+    list,
+    el("div", { class: "more" }, more));
+}
+
 async function renderGame(appid, rangeKey, token) {
   const [data, overview] = await Promise.all([
     api(`/api/games/${appid}?range=${rangeKey}`),
@@ -401,8 +491,6 @@ async function renderGame(appid, rangeKey, token) {
   const tile = overview.games.find((g) => g.appid === appid) || {};
   const meta = data.meta;
   const summary = data.review_summary;
-  data.ccu = withGaps(data.ccu, data.ccu_bucket_ms);
-
   const image = safeUrl(meta.image);
   const facts = [
     meta.developers.length ? `Studio: ${meta.developers.join(", ")}` : null,
@@ -411,31 +499,55 @@ async function renderGame(appid, rangeKey, token) {
     meta.genres.length ? meta.genres.join(" · ") : null,
   ].filter(Boolean);
 
-  let newsFilter = "official";
-  const newsList = el("ul", { class: "news-list" });
-  const newsCount = el("span", { class: "muted" });
-  const filterChips = el("div", { class: "chips" });
-  function renderNews() {
-    const items = data.news.filter((n) => newsFilter === "all" || (newsFilter === "official") === n.official);
-    newsCount.textContent = `${nf.format(items.length)} w wybranym okresie`;
-    filterChips.replaceChildren(...[["official", "Oficjalne"], ["external", "Zewnętrzne"], ["all", "Wszystkie"]].map(([key, label]) =>
-      el("button", { class: `chip ${newsFilter === key ? "active" : ""}`, onclick: () => { newsFilter = key; renderNews(); } }, label)));
-    const shown = items.slice(0, 200);
-    newsList.replaceChildren(...(shown.length ? shown.map((n) =>
-      el("li", { class: n.official ? "official" : "" },
-        el("button", { onclick: () => openNews(appid, n.gid) },
-          el("span", { class: "date" }, dateFmt.format(n.date_ms)),
-          el("span", { class: "title" }, n.title || "(bez tytułu)"),
-          el("span", { class: "feed" }, n.feedlabel || "")))) : [el("li", { class: "empty" }, "Brak newsów w tym okresie.")]));
-    if (items.length > shown.length) newsList.append(el("li", { class: "empty" }, `Pokazano 200 najnowszych z ${nf.format(items.length)}. Zawęź okres, żeby zobaczyć resztę.`));
+  // --- description, two lines unless expanded
+  let desc = null;
+  if (meta.description) {
+    const text = el("div", { class: "desc clamp" }, meta.description);
+    const toggle = el("button", { class: "link", onclick: () => {
+      const open = text.classList.toggle("clamp") === false;
+      toggle.textContent = open ? "Zwiń opis" : "Pokaż cały opis";
+    } }, "Pokaż cały opis");
+    desc = el("div", {}, text, toggle);
   }
 
-  const chartBox = el("div", { id: "chart" });
-  const firstCcu = overview.status.first_ts;
-  const note = firstCcu && data.range.from < firstCcu
-    ? `Liczba graczy jest zbierana od ${dateTimeFmt.format(firstCcu)}. Steam nie udostępnia wcześniejszej historii, więc starsza część wykresu jest pusta.`
-    : null;
+  // --- players chart
+  const playersBox = el("div", { class: "chart players" });
+  let showMarkers = true;
+  const markerToggle = el("button", { class: "chip active", onclick: () => {
+    showMarkers = !showMarkers;
+    markerToggle.classList.toggle("active", showMarkers);
+    charts[0].dispose();
+    charts[0] = drawPlayers(playersBox, data, appid, showMarkers);
+  } }, "Znaczniki wydarzeń");
+  const collected = data.ccu_first_ts
+    ? `Pomiary co 5 minut od ${dateTimeFmt.format(data.ccu_first_ts)}. Steam nie udostępnia wcześniejszej historii. Przerwa w linii oznacza, że kolektor nie działał.`
+    : "Dla tej gry nie ma jeszcze żadnego pomiaru.";
 
+  // --- reviews chart
+  const reviewsBox = el("div", { class: "chart reviews" });
+  let granularity = "month";
+  const reviewChips = el("div", { class: "chips" });
+  function paintReviews() {
+    reviewChips.replaceChildren(...[["month", "Cała historia, miesięcznie"], ["day", "Ostatnie 30 dni, dziennie"]].map(([key, label]) =>
+      el("button", { class: `chip ${granularity === key ? "active" : ""}`, onclick: () => { granularity = key; paintReviews(); } }, label)));
+    if (charts[1]) charts[1].dispose();
+    charts[1] = drawReviews(reviewsBox, granularity === "day" ? data.reviews.daily : data.reviews.monthly, granularity);
+  }
+
+  // --- events
+  const archiveSlot = el("div", {});
+  const totalNews = data.news_totals.official + data.news_totals.external;
+  const archiveButton = el("button", { class: "chip", onclick: () => {
+    if (archiveSlot.hasChildNodes()) {
+      archiveSlot.replaceChildren();
+      archiveButton.textContent = `Wszystkie newsy (${nf.format(totalNews)})`;
+    } else {
+      archiveSlot.replaceChildren(newsArchive(appid, data.news_totals));
+      archiveButton.textContent = "Ukryj archiwum";
+    }
+  } }, `Wszystkie newsy (${nf.format(totalNews)})`);
+
+  const change = changeNode(tile.change_24h);
   view.replaceChildren(
     el("a", { class: "back", href: "#/" }, "← Wszystkie gry"),
     el("div", { class: "game-head" },
@@ -444,34 +556,46 @@ async function renderGame(appid, rangeKey, token) {
         el("h1", {}, meta.name),
         el("div", { class: "facts" }, facts.map((f) => el("span", {}, f)),
           el("a", { href: meta.store_url, target: "_blank", rel: "noopener noreferrer" }, "Strona w Steamie ↗")),
-        meta.description ? el("div", { class: "desc" }, meta.description) : null)),
+        desc)),
     el("div", { class: "stats" },
       statCard("Graczy teraz (Steam)", tile.players == null ? "—" : nf.format(tile.players), tile.players_ts ? ago(tile.players_ts) : "brak pomiaru"),
-      statCard("Zmiana 24 h", changeNode(tile.change_24h) || "—", "względem tej samej pory wczoraj"),
-      statCard("Recenzje, 30 dni", pctText(summary.recent.pct), reviewSub(summary.recent)),
-      statCard("Recenzje, całość", pctText(summary.all.pct), reviewSub(summary.all))),
+      statCard("Zmiana 24 h", change || el("span", { class: "muted small" }, "Za mało danych"),
+        change ? "względem tej samej pory wczoraj" : "pojawi się po dobie zbierania"),
+      statCard("Szczyt 24 h", data.peak_24h == null ? "—" : nf.format(data.peak_24h), "najwyższy pomiar z ostatniej doby"),
+      statCard("Recenzje, 30 dni", pctText(summary.recent.pct), reviewSub(summary.recent))),
     el("div", { class: "panel" },
       el("div", { class: "panel-head" },
-        el("h2", {}, "Gracze, wydarzenia i recenzje"),
-        el("div", { class: "chips" }, RANGES.map(([key, label]) =>
+        el("h2", {}, "Aktywność graczy"),
+        el("div", { class: "chips" }, markerToggle, RANGES.map(([key, label]) =>
           el("a", { class: `chip ${key === rangeKey ? "active" : ""}`, href: `#/game/${appid}/${key}` }, label)))),
-      el("div", { class: "legend" },
-        el("span", {}, el("i", { style: `background:${COLORS.accent}` }), "gracze i oficjalne newsy"),
-        el("span", {}, el("i", { style: `background:${COLORS.muted}` }), "newsy zewnętrzne"),
-        el("span", {}, el("i", { style: `background:${COLORS.up}` }), "recenzje pozytywne"),
-        el("span", {}, el("i", { style: `background:${COLORS.down}` }), "recenzje negatywne"),
-        el("span", {}, "Kliknij kropkę, żeby przeczytać news. Kółkiem myszy przybliżasz.")),
-      chartBox,
-      note ? el("div", { class: "chart-note" }, note) : null),
+      playersBox,
+      el("div", { class: "chart-note" },
+        el("span", { class: "legend" },
+          el("span", {}, el("i", { style: `background:${COLORS.event}` }), "dzień z ważnym wydarzeniem"),
+          el("span", {}, el("i", { style: `background:${COLORS.muted}` }), "dzień z innymi newsami")),
+        collected)),
     el("div", { class: "panel why" },
       el("h2", {}, "Dlaczego?"),
-      el("p", {}, "Tu pojawią się wyjaśnienia nietypowych skoków i spadków, razem z dowodami. Ta część powstanie razem z agentem.")),
+      el("p", {}, "Analiza ruszy, gdy uzbiera się dość historii, żeby odróżnić nietypowy skok od zwykłego rytmu dnia i tygodnia. Wtedy pojawią się tu wyjaśnienia razem z dowodami.")),
     el("div", { class: "panel" },
-      el("div", { class: "panel-head" }, el("h2", {}, "Newsy"), newsCount, filterChips),
-      newsList),
+      el("div", { class: "panel-head" },
+        el("h2", {}, "Najważniejsze wydarzenia"),
+        el("span", { class: "muted" }, "oficjalne, z ostatnich 90 dni"),
+        archiveButton),
+      el("ul", { class: "news-list" }, data.highlights.length
+        ? data.highlights.map((n) => newsRow(appid, n))
+        : [el("li", { class: "empty" }, "Brak oficjalnych newsów z ostatnich 90 dni.")]),
+      el("div", { class: "chart-note" }, "Kategorie nadają na razie proste reguły po tytule. Docelowo zrobi to klasyfikator czytający całą treść."),
+      archiveSlot),
+    el("div", { class: "panel" },
+      el("div", { class: "panel-head" },
+        el("h2", {}, "Recenzje"),
+        el("span", { class: "muted" }, `Cała historia: ${pctText(summary.all.pct)} pozytywnych (${reviewSub(summary.all)})`),
+        reviewChips),
+      reviewsBox),
   );
-  renderNews();
-  drawChart(chartBox, data, appid);
+  charts = [drawPlayers(playersBox, data, appid, showMarkers), null];
+  paintReviews();
 }
 
 // ---------------------------------------------------------------- router
@@ -480,11 +604,12 @@ async function route() {
   const token = ++renderToken;
   clearInterval(refreshTimer);
   closeDrawer();
-  if (chart) { chart.dispose(); chart = null; }
+  charts.forEach((c) => c && c.dispose());
+  charts = [];
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   try {
     if (parts[0] === "game" && /^\d+$/.test(parts[1] || "")) {
-      const rangeKey = RANGES.some(([key]) => key === parts[2]) ? parts[2] : "30d";
+      const rangeKey = RANGES.some(([key]) => key === parts[2]) ? parts[2] : "7d";
       if (!view.hasChildNodes()) view.replaceChildren(el("div", { class: "empty" }, "Wczytywanie…"));
       await renderGame(Number(parts[1]), rangeKey, token);
       window.scrollTo(0, parts[2] ? window.scrollY : 0);
@@ -501,5 +626,5 @@ async function route() {
 }
 
 window.addEventListener("hashchange", route);
-window.addEventListener("resize", () => chart && chart.resize());
+window.addEventListener("resize", () => charts.forEach((c) => c && c.resize()));
 route();

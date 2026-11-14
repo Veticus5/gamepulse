@@ -28,8 +28,13 @@ Jeśli ten sam kolektor już działa, drugie uruchomienie nic nie robi i kończy
 
 - strona główna: kafelki gier od największej liczby graczy, z wykresem z 24 h,
   odsetkiem pozytywnych recenzji z 30 dni i wiekiem ostatniego oficjalnego newsa;
-- strona gry: metadane, wykres graczy, newsy na tej samej osi czasu, recenzje
-  pozytywne i negatywne oraz lista newsów z treścią.
+- strona gry: metadane, wykres graczy tylko na okresie z pomiarami (jeden
+  znacznik na dzień z oficjalnymi newsami), pięć najważniejszych wydarzeń
+  z 90 dni, archiwum newsów z wyszukiwarką oraz osobny wykres historii recenzji.
+
+Kategorie i ważność newsów nadają na razie proste reguły po tytule
+(`src/gamepulse/web/events.py`). To rozwiązanie tymczasowe do czasu
+klasyfikatora i nie jest dowodem dla agenta.
 
 Dane czyta DuckDB wprost z plików w `data/raw/` i odświeża je, gdy pliki się
 zmienią. Okładki i biblioteka wykresów ECharts ładują się z internetu.
