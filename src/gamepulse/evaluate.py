@@ -6,6 +6,7 @@ answer) into ``eval/news_labels.jsonl``. ``score`` then compares the two.
 """
 
 import random
+import sys
 import time
 from pathlib import Path
 
@@ -173,6 +174,8 @@ def run(client: httpx.Client, games: list[Game], data_dir: Path, eval_dir: Path,
             if item.get("gid") in wanted and item["gid"] not in done
         ]
         if missing:
+            # Without this line the command looks frozen while the model reads.
+            print(f"Model czyta {len(missing)} oznaczonych newsów: {game.name}…", file=sys.stderr, flush=True)
             classify.classify_many(client, data_dir, game, missing, model)
             done = classify.load_events(data_dir, appid, model=model)
         predictions.update({gid: done[gid]["event_type"] for gid in wanted if gid in done})
