@@ -6,14 +6,22 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
+from gamepulse import evaluate
+from gamepulse.classify import EVENT_TYPES
 from gamepulse.config import Game
 from gamepulse.web.store import NEWS_KINDS, RANGES, Store
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-def create_app(data_dir: Path, games: list[Game]) -> FastAPI:
+class Label(BaseModel):
+    gid: str
+    event_type: str | None = None  # None = skipped by the labeller
+
+
+def create_app(data_dir: Path, games: list[Game], eval_dir: Path = Path("eval")) -> FastAPI:
     app = FastAPI(title="GamePulse", docs_url=None, redoc_url=None, openapi_url=None)
     store = Store(data_dir, games)
 
@@ -51,6 +59,34 @@ def create_app(data_dir: Path, games: list[Game]) -> FastAPI:
         if result is None:
             raise HTTPException(404, "news item not found")
         return result
+
+    @app.get("/api/label/next")
+    def label_next() -> dict:
+        """The next sampled news item without a label. The model's answer is
+        deliberately not included, so labels stay independent of it."""
+        sample = evaluate.load_sample(eval_dir)
+        labels = evaluate.load_labels(eval_dir)
+        todo = [row for row in sample if row["gid"] not in labels]
+        item = None
+        if todo:
+            found = store.news_item(todo[0]["appid"], todo[0]["gid"])
+            if found is not None:
+                item = {key: found[key] for key in ("gid", "title", "date_ms", "url", "contents")}
+                item["game"] = next((g.name for g in games if g.appid == todo[0]["appid"]), "")
+            else:  # the sampled item is gone from the data; do not get stuck on it
+                evaluate.save_label(eval_dir, todo[0]["gid"], todo[0]["appid"], None)
+                return label_next()
+        return {"total": len(sample), "done": len(sample) - len(todo), "item": item, "event_types": list(EVENT_TYPES)}
+
+    @app.post("/api/label")
+    def label_save(label: Label) -> dict:
+        appids = {row["gid"]: row["appid"] for row in evaluate.load_sample(eval_dir)}
+        if label.gid not in appids:
+            raise HTTPException(404, "news item is not in the sample")
+        if label.event_type is not None and label.event_type not in EVENT_TYPES:
+            raise HTTPException(400, "unknown event type")
+        evaluate.save_label(eval_dir, label.gid, appids[label.gid], label.event_type)
+        return {"ok": True}
 
     @app.get("/")
     def index() -> FileResponse:

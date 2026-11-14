@@ -203,10 +203,13 @@ async function renderOverview(token) {
 // ---------------------------------------------------------------- game page
 
 const CATEGORY = {
-  release: "Premiera lub nowa zawartość",
-  update: "Aktualizacja",
+  content_release: "Premiera lub nowa zawartość",
+  patch: "Aktualizacja",
   announcement: "Zapowiedź",
   sale: "Promocja",
+  free_weekend: "Darmowy dostęp",
+  in_game_event: "Wydarzenie w grze",
+  store_item: "Sklep w grze",
   community: "Społeczność",
   other: "Inne",
 };
@@ -225,8 +228,10 @@ function reviewSub(summary) {
 }
 
 function badge(item) {
-  return el("span", { class: `badge cat-${item.category}${item.priority >= 3 ? " strong" : ""}` },
-    item.official ? CATEGORY[item.category] : "Zewnętrzny");
+  return el("span", {
+    class: `badge${item.priority >= 2 ? " notable" : ""}${item.priority >= 3 ? " strong" : ""}`,
+    title: !item.official ? "" : item.source === "model" ? "Etykieta nadana przez model" : "Etykieta z prostej reguły po tytule; model jeszcze nie czytał tego newsa",
+  }, item.official ? (CATEGORY[item.category] || "Inne") + (item.source === "model" ? "" : " ?") : "Zewnętrzny");
 }
 
 function openDrawer(...nodes) {
@@ -243,8 +248,15 @@ async function openNews(appid, gid, back) {
       back ? el("button", { class: "link", onclick: back }, "← Wróć do listy wydarzeń") : null,
       el("h3", {}, item.title || "(bez tytułu)"),
       el("div", { class: "meta" },
-        `${dateTimeFmt.format(item.date_ms)} · ${item.official ? CATEGORY[item.category] : "zewnętrzny"} · ${item.feedlabel || ""}`,
+        `${dateTimeFmt.format(item.date_ms)} · ${item.feedlabel || ""}`,
         link ? [" · ", el("a", { href: link, target: "_blank", rel: "noopener noreferrer" }, "źródło")] : null),
+      el("div", { class: "labelbox" },
+        el("div", {}, badge(item),
+          item.effective_date ? el("span", { class: "muted" }, ` Data wydarzenia: ${dateFmt.format(new Date(item.effective_date + "T12:00:00Z"))}`) : null),
+        item.summary ? el("div", {}, item.summary) : null,
+        el("div", { class: "muted fine" }, !item.official ? "News spoza studia; nie jest klasyfikowany."
+          : item.source === "model" ? "Typ, datę i streszczenie nadał lokalny model. Mogą być błędne."
+          : "Typ z prostej reguły po tytule. Model jeszcze nie czytał tego newsa.")),
       el("div", { class: "body" }, plainText(item.contents) || "Brak treści."),
     );
   } catch (error) {
@@ -486,7 +498,8 @@ function drawReviews(container, points, granularity, mode, markers, appid) {
 function newsRow(appid, item) {
   return el("li", {}, el("button", { onclick: () => openNews(appid, item.gid) },
     el("span", { class: "date" }, dateFmt.format(item.date_ms)),
-    el("span", { class: "title" }, item.title || "(bez tytułu)"),
+    el("span", { class: "title" }, item.title || "(bez tytułu)",
+      item.summary ? el("span", { class: "summary" }, item.summary) : null),
     badge(item)));
 }
 
@@ -667,7 +680,8 @@ async function renderGame(appid, rangeKey, token) {
       el("ul", { class: "news-list" }, data.highlights.length
         ? data.highlights.map((n) => newsRow(appid, n))
         : [el("li", { class: "empty" }, "Brak oficjalnych newsów z ostatnich 90 dni.")]),
-      el("div", { class: "chart-note" }, "Kategorie nadają na razie proste reguły po tytule. Docelowo zrobi to klasyfikator czytający całą treść."),
+      el("div", { class: "chart-note" },
+        `Lokalny model przeczytał ${nf.format(data.news_totals.classified)} z ${nf.format(data.news_totals.official)} oficjalnych newsów tej gry. Pozostałe mają etykietę z prostej reguły po tytule, oznaczoną znakiem zapytania.`),
       archiveSlot),
     el("div", { class: "panel" },
       el("div", { class: "panel-head" },
@@ -676,11 +690,93 @@ async function renderGame(appid, rangeKey, token) {
         reviewChips),
       reviewsBox,
       el("div", { class: "chart-note" },
-        crowded ? "Znaczniki są domyślnie wyłączone: obecne reguły oznaczają dla tej gry zbyt wiele miesięcy jako premierę. Poprawi to klasyfikator. " : "",
+        crowded ? "Znaczniki są domyślnie wyłączone: reguły po tytule oznaczają dla tej gry zbyt wiele miesięcy jako premierę. Zmieni się to, gdy model przeczyta starsze newsy. " : "",
         `Linie przerywane to wydarzenia: w całej historii tylko premiery i nowa zawartość, w ostatnich 30 dniach także aktualizacje i zapowiedzi. W widoku procentowym pominięto okresy z mniej niż ${MIN_REVIEWS} recenzjami.`)),
   );
   charts = [drawPlayers(playersBox, data, appid, showMarkers, fromZero), null];
   paintReviews();
+}
+
+// ---------------------------------------------------------------- labelling page
+
+const TYPE_HINT = {
+  content_release: "Nowa grywalna zawartość już jest albo wchodzi w podanym dniu: premiera, dodatek, DLC, sezon, liga, nowa mapa lub postać.",
+  patch: "Poprawki, balans, hotfix, lista zmian, przerwa techniczna, bez dużej nowej zawartości.",
+  announcement: "Coś, co dopiero będzie: zapowiedź, harmonogram, zwiastun, nadchodzący konwent.",
+  sale: "Obniżka ceny gry lub dodatków.",
+  free_weekend: "Gra czasowo za darmo albo przechodzi na free-to-play.",
+  in_game_event: "Wydarzenie czasowe w grze: podwójne XP, event świąteczny, tryb na ograniczony czas.",
+  store_item: "Nowe skórki, paczki, mikrotransakcje, przedmioty z przepustki sprzedawane w sklepie gry.",
+  community: "Fan arty, konkursy, e-sport, turnieje, streamy, Twitch Drops, wywiady, gadżety, ankiety.",
+  other: "Nic z powyższych.",
+};
+
+let labelKeys = null;
+
+async function renderLabel(token) {
+  const data = await api("/api/label/next");
+  if (token !== renderToken) return;
+  if (labelKeys) document.removeEventListener("keydown", labelKeys);
+  labelKeys = null;
+  const head = el("div", { class: "panel-head" },
+    el("h2", {}, "Oznaczanie newsów do pomiaru trafności modelu"),
+    el("span", { class: "muted" }, `${data.done} z ${data.total}`));
+  if (!data.total) {
+    view.replaceChildren(el("div", { class: "panel" }, head,
+      el("p", { class: "muted" }, "Nie ma jeszcze próbki. Utwórz ją poleceniem: uv run gamepulse eval-sample")));
+    return;
+  }
+  if (!data.item) {
+    view.replaceChildren(el("div", { class: "panel" }, head,
+      el("p", {}, "Wszystkie newsy z próbki są oznaczone."),
+      el("p", { class: "muted" }, "Wynik porównania z modelem pokaże polecenie: uv run gamepulse eval-classifier")));
+    return;
+  }
+  const item = data.item;
+  let busy = false;
+  async function save(eventType) {
+    if (busy) return;
+    busy = true;
+    try {
+      const response = await fetch("/api/label", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gid: item.gid, event_type: eventType }),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      await renderLabel(renderToken);
+      window.scrollTo(0, 0);
+    } catch (error) {
+      busy = false;
+      console.error(error);
+    }
+  }
+  labelKeys = (event) => {
+    if (event.target instanceof HTMLInputElement || event.ctrlKey || event.metaKey || event.altKey) return;
+    const index = "123456789".indexOf(event.key);
+    if (index >= 0 && index < data.event_types.length) save(data.event_types[index]);
+    else if (event.key === "0") save(null);
+  };
+  document.addEventListener("keydown", labelKeys);
+  const link = safeUrl(item.url);
+  view.replaceChildren(
+    el("a", { class: "back", href: "#/" }, "← Wszystkie gry"),
+    el("div", { class: "panel", style: "margin-top:14px" }, head,
+      el("p", { class: "muted" }, "Wybierz typ, który najlepiej opisuje news. Odpowiedź modelu jest ukryta, żeby nie wpływała na Twoją ocenę. Możesz używać klawiszy 1–9, a 0 pomija news."),
+      el("div", { class: "label-grid" },
+        el("div", { class: "label-news" },
+          el("div", { class: "muted" }, `${item.game} · ${dateFmt.format(item.date_ms)}`,
+            link ? [" · ", el("a", { class: "link", href: link, target: "_blank", rel: "noopener noreferrer" }, "źródło")] : null),
+          el("h3", {}, item.title || "(bez tytułu)"),
+          el("div", { class: "body" }, plainText(item.contents) || "Brak treści.")),
+        el("div", { class: "label-choices" },
+          data.event_types.map((type, index) =>
+            el("button", { onclick: () => save(type) },
+              el("span", { class: "key" }, String(index + 1)),
+              el("span", {}, el("strong", {}, CATEGORY[type] || type), el("span", { class: "hint" }, TYPE_HINT[type] || "")))),
+          el("button", { class: "skip", onclick: () => save(null) },
+            el("span", { class: "key" }, "0"), el("span", {}, el("strong", {}, "Pomiń"), el("span", { class: "hint" }, "Nie da się ocenić albo news jest nieczytelny.")))))),
+  );
 }
 
 // ---------------------------------------------------------------- router
@@ -688,6 +784,7 @@ async function renderGame(appid, rangeKey, token) {
 async function route() {
   const token = ++renderToken;
   clearInterval(refreshTimer);
+  if (labelKeys) { document.removeEventListener("keydown", labelKeys); labelKeys = null; }
   closeDrawer();
   charts.forEach((c) => c && c.dispose());
   charts = [];
@@ -698,6 +795,8 @@ async function route() {
       if (!view.hasChildNodes()) view.replaceChildren(el("div", { class: "empty" }, "Wczytywanie…"));
       await renderGame(Number(parts[1]), rangeKey, token);
       window.scrollTo(0, parts[2] ? window.scrollY : 0);
+    } else if (parts[0] === "label") {
+      await renderLabel(token);
     } else {
       if (!view.hasChildNodes()) view.replaceChildren(el("div", { class: "empty" }, "Wczytywanie…"));
       await renderOverview(token);

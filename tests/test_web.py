@@ -147,7 +147,7 @@ def test_game_highlights_prefer_important_recent_official_news(data_dir):
     assert "big" in gids and "a" in gids  # the launch and the patch beat fan art
     assert "ancient" not in gids and "b" not in gids  # too old; not from the developer
     assert gids == sorted(gids, key=lambda g: -next(h["date_ms"] for h in result["highlights"] if h["gid"] == g))
-    assert result["news_totals"] == {"official": 12, "external": 1}
+    assert result["news_totals"] == {"official": 12, "external": 1, "classified": 0}
 
 
 def test_review_markers_launches_per_month_and_notable_per_day(data_dir):
@@ -208,10 +208,35 @@ def test_api_endpoints(data_dir):
     assert client.get("/api/games/1").status_code == 404
     item = client.get("/api/games/730/news/a").json()
     assert item["contents"] == "notes more"
-    assert item["category"] == "update"
+    assert item["category"] == "patch"
     assert client.get("/api/games/730/news?kind=all&q=press").json()["total"] == 1
     assert client.get("/api/games/730/news?kind=bogus").status_code == 400
     assert client.get("/api/games/730/news?limit=9999").status_code == 422
     assert client.get("/api/games/730/news/zzz").status_code == 404
     assert client.get("/api/games/570/news/a").status_code == 404
     assert client.get("/").status_code == 200
+
+
+def test_model_labels_replace_rules_and_move_markers_to_the_effective_date(data_dir):
+    from datetime import UTC, datetime
+
+    effective = datetime.fromtimestamp((NOW - 6 * HOUR) / 1000, UTC).date().isoformat()
+    append_jsonl(
+        data_dir / "derived" / "news_events" / "730.jsonl",
+        [
+            {"gid": "a", "appid": 730, "event_type": "community", "importance": "low", "summary": "stare", "effective_date": None},
+            {"gid": "a", "appid": 730, "event_type": "content_release", "importance": "high",
+             "summary": "Nowa operacja.", "effective_date": effective},
+            {"gid": "b", "appid": 730, "event_type": "patch", "importance": "high", "summary": "x", "effective_date": None},
+        ],
+    )
+    store = Store(data_dir, GAMES)
+    item = store.news_item(730, "a")
+    assert (item["category"], item["priority"], item["source"]) == ("content_release", 3, "model")
+    assert item["summary"] == "Nowa operacja." and item["effective_date"] == effective
+    assert store.news_item(730, "b")["source"] == "rules"  # not from the developer: labels are ignored
+    assert store.news_item(730, "old")["source"] == "rules"
+    result = store.game(730, "24h", NOW)
+    # Published two days ago, but takes effect within the last 24 hours.
+    assert [m["items"][0]["gid"] for m in result["markers"]] == ["a"]
+    assert result["news_totals"]["classified"] == 1

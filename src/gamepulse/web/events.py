@@ -1,8 +1,8 @@
 """Provisional news categories, assigned by simple rules on the title.
 
-This only decides what the interface shows first. It is a stand-in for the
-planned news classifier (a language model reading the full text), which
-will replace it; nothing here should be used as evidence by the agent.
+A fallback for news the classifier (gamepulse.classify) has not labelled
+yet. It uses the classifier's type names, only decides what the interface
+shows first, and must not be used as evidence by the agent.
 """
 
 import re
@@ -20,11 +20,11 @@ _RULES: list[tuple[str, re.Pattern]] = [
     ),
     ("sale", re.compile(r"\bsale\b|% off|discount|free weekend|free to play (this|for)|\bbundle\b", re.I)),
     (
-        "update",
+        "patch",
         re.compile(r"\bpatch\b|patch ?notes|hot ?fix|\bupdate\b|changelog|release notes|\bv?\d+\.\d+(\.\d+)*[a-z]?\b.*(patch|notes|live)", re.I),
     ),
     (
-        "release",
+        "content_release",
         re.compile(
             r"now available|out now|is live|is here|has (arrived|launched)|launch(es|ed)?\b|"
             r"available now|\bdlc\b|expansion|new (season|league|chapter|map|operator|hero|character)|"
@@ -40,14 +40,14 @@ _RULES: list[tuple[str, re.Pattern]] = [
 
 # Higher shows first. Launches move player counts the most; routine
 # community posts the least.
-PRIORITY = {"release": 3, "update": 2, "announcement": 2, "sale": 2, "community": 1, "other": 1}
+PRIORITY = {"content_release": 3, "patch": 2, "announcement": 2, "sale": 2, "community": 1, "other": 1}
 
 
 def classify(title: str | None, official: bool, tags: list[str] | None = None) -> tuple[str, int]:
     """Return (category, priority); anything not from the developer gets priority 0."""
     category = "other"
     if tags and "patchnotes" in tags:
-        category = "update"
+        category = "patch"
     else:
         for name, pattern in _RULES:
             if pattern.search(title or ""):

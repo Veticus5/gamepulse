@@ -13,7 +13,8 @@ import duckdb
 
 from gamepulse.config import Game
 from gamepulse.storage import read_jsonl
-from gamepulse.web.events import classify
+from gamepulse.classify import priority_of
+from gamepulse.web.events import classify as rule_category
 
 MINUTE = 60_000
 HOUR = 60 * MINUTE
@@ -51,14 +52,14 @@ def _group_markers(items: list[dict], bucket) -> list[dict]:
     """One marker per bucket (a day or a month), most important item first."""
     groups: dict[int, list[dict]] = {}
     for item in items:
-        groups.setdefault(bucket(item["date_ms"]), []).append(item)
+        groups.setdefault(bucket(item["event_ms"]), []).append(item)
     markers = []
     for start, group in sorted(groups.items()):
-        group.sort(key=lambda n: (-n["priority"], -n["date_ms"]))
+        group.sort(key=lambda n: (-n["priority"], -n["event_ms"]))
         markers.append(
             {
                 "day_ms": start,
-                "at_ms": group[0]["date_ms"],
+                "at_ms": group[0]["event_ms"],
                 "count": len(group),
                 "priority": group[0]["priority"],
                 "items": group[:8],
@@ -82,6 +83,7 @@ class Store:
         self._signatures: dict[str, tuple] = {}
         self._reviews: dict[int, dict] = {}
         self._meta: dict[int, dict] = {}
+        self._events: dict[str, dict] = {}
 
     # ------------------------------------------------------------ loading
 
@@ -152,6 +154,10 @@ class Store:
         files = self._files("review_histogram")
         if self._changed("reviews", files):
             self._reviews = self._latest_snapshots(files, "results")
+        files = sorted((self.data_dir / "derived" / "news_events").glob("*.jsonl"))
+        if self._changed("events", files):
+            # Later lines win, so a re-classification replaces the earlier label.
+            self._events = {row.get("gid"): row for path in files for row in read_jsonl(path)}
         files = self._files("appdetails")
         if self._changed("meta", files):
             self._meta = self._latest_snapshots(files, "details")
@@ -290,19 +296,35 @@ class Store:
                 },
             }
 
-    @staticmethod
-    def _news_dict(gid, title, date, feed_type, feedlabel, url, tags) -> dict:
+    def _news_dict(self, gid, title, date, feed_type, feedlabel, url, tags) -> dict:
         official = feed_type == 1
-        category, priority = classify(title, official, tags)
+        event = self._events.get(gid) if official else None
+        if event:
+            category, priority, source = event.get("event_type"), priority_of(event), "model"
+        else:
+            (category, priority), source = rule_category(title, official, tags), "rules"
+        # Where the event sits on a time axis: the day it takes effect when
+        # the classifier found one, otherwise the moment the post went out.
+        event_ms = date
+        effective = event.get("effective_date") if event else None
+        if effective:
+            try:
+                event_ms = int(datetime.fromisoformat(effective).replace(tzinfo=UTC).timestamp() * 1000) + 12 * HOUR
+            except ValueError:
+                effective = None
         return {
             "gid": gid,
             "title": title,
             "date_ms": date,
+            "event_ms": event_ms,
+            "effective_date": effective,
             "official": official,
             "feedlabel": feedlabel,
             "url": url,
             "category": category,
             "priority": priority,
+            "source": source,
+            "summary": event.get("summary") if event else None,
         }
 
     def game(self, appid: int, range_key: str, now_ms: int) -> dict | None:
@@ -338,18 +360,6 @@ class Store:
             )[0][0]
 
             columns = "gid, title, date_ms, feed_type, feedlabel, url, tags"
-            in_range = [
-                self._news_dict(*row)
-                for row in self._rows(
-                    f"SELECT {columns} FROM news WHERE appid = ? AND feed_type = 1 "
-                    "AND date_ms >= ? AND date_ms <= ? ORDER BY date_ms",
-                    [appid, since, now_ms],
-                )
-            ]
-            markers = _group_markers(in_range, lambda ms: ms - ms % DAY)
-
-            # Markers for the review charts: only launches over the whole
-            # history (per month), anything notable over the last 30 days (per day).
             everything = [
                 self._news_dict(*row)
                 for row in self._rows(
@@ -357,23 +367,25 @@ class Store:
                     [appid],
                 )
             ]
+            in_range = [n for n in everything if since <= n["event_ms"] <= now_ms]
+            markers = _group_markers(in_range, lambda ms: ms - ms % DAY)
+
+            # Markers for the review charts: only launches over the whole
+            # history (per month), anything notable over the last 30 days (per day).
             review_markers = {
-                "monthly": _group_markers([n for n in everything if n["priority"] >= 3], _month_start),
+                "monthly": _group_markers(
+                    [n for n in everything if n["priority"] >= 3 and n["event_ms"] <= now_ms], _month_start
+                ),
                 "daily": _group_markers(
-                    [n for n in everything if n["priority"] >= 2 and n["date_ms"] >= now_ms - 31 * DAY],
+                    [n for n in everything if n["priority"] >= 2 and now_ms - 31 * DAY <= n["event_ms"] <= now_ms],
                     lambda ms: ms - ms % DAY,
                 ),
             }
 
-            recent = [
-                self._news_dict(*row)
-                for row in self._rows(
-                    f"SELECT {columns} FROM news WHERE appid = ? AND feed_type = 1 AND date_ms >= ?",
-                    [appid, now_ms - HIGHLIGHT_WINDOW],
-                )
-            ]
+            recent = [n for n in everything if n["date_ms"] >= now_ms - HIGHLIGHT_WINDOW]
             recent.sort(key=lambda n: (-n["priority"], -n["date_ms"]))
             highlights = sorted(recent[:5], key=lambda n: -n["date_ms"])
+            classified = sum(1 for n in everything if n["source"] == "model")
             totals = dict(
                 self._rows(
                     "SELECT feed_type = 1, count(*) FROM news WHERE appid = ? GROUP BY 1", [appid]
@@ -399,7 +411,11 @@ class Store:
                 "markers": markers,
                 "review_markers": review_markers,
                 "highlights": highlights,
-                "news_totals": {"official": totals.get(True, 0), "external": totals.get(False, 0)},
+                "news_totals": {
+                    "official": totals.get(True, 0),
+                    "external": totals.get(False, 0),
+                    "classified": classified,
+                },
                 "reviews": {
                     "daily": review_points(results.get("recent")),
                     "monthly": review_points(results.get("rollups")),
@@ -441,13 +457,7 @@ class Store:
             return None
         title, date, feed_type, feedlabel, url, author, contents, tags = rows[0]
         return {
-            "category": classify(title, feed_type == 1, tags)[0],
-            "gid": gid,
-            "title": title,
-            "date_ms": date,
-            "official": feed_type == 1,
-            "feedlabel": feedlabel,
-            "url": url,
+            **self._news_dict(gid, title, date, feed_type, feedlabel, url, tags),
             "author": author,
             "contents": contents or "",
         }

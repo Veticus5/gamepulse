@@ -40,6 +40,33 @@ Dane czyta DuckDB wprost z plików w `data/raw/` i odświeża je, gdy pliki się
 zmienią. Okładki i biblioteka wykresów ECharts ładują się z internetu.
 Metadane nie mają timera: po dodaniu gry uruchom `uv run gamepulse meta`.
 
+## Klasyfikator newsów
+
+`uv run gamepulse classify` czyta oficjalne newsy lokalnym modelem przez Ollamę
+(domyślnie `qwen3.8:27b`, ostatnie 90 dni, najnowsze najpierw) i zapisuje dla
+każdego typ wydarzenia, datę wejścia w życie, jednozdaniowe streszczenie,
+ważność i pewność. Jedno wywołanie na news, bez narzędzi, wymuszony JSON.
+
+- Wyniki: `data/derived/news_events/<appid>.jsonl`, raz na news, model i wersję promptu.
+- Każde wywołanie (także nieudane) trafia do `data/derived/agent_runs/RRRR-MM-DD.jsonl`
+  z liczbą tokenów i czasem.
+- Odpowiedź modelu sprawdza kod: nieznany typ odrzuca cały wynik, a data
+  odległa od publikacji o więcej niż 45 dni wstecz lub 400 dni w przód jest pomijana.
+- `--since-days 3650` obejmie całą historię (około 12 tys. newsów, kilka godzin GPU),
+  `--limit N` ogranicza liczbę newsów, `--model` zmienia model.
+- Interfejs pokazuje etykiety modelu, a dla newsów jeszcze nieprzeczytanych
+  etykietę z reguły po tytule, oznaczoną znakiem zapytania.
+
+### Pomiar trafności
+
+1. `uv run gamepulse eval-sample` losuje 100 oficjalnych newsów z ostatniego roku
+   do `eval/news_sample.jsonl` (plik jest w repozytorium i nie jest nadpisywany).
+2. Na stronie `#/label` interfejsu oznaczasz je ręcznie; odpowiedź modelu jest ukryta.
+   Etykiety trafiają do `eval/news_labels.jsonl`.
+3. `uv run gamepulse eval-classifier` porównuje model z etykietami: trafność,
+   precyzja i czułość per typ oraz lista rozbieżności. Uruchamiaj po każdej
+   zmianie promptu lub modelu.
+
 ## Lista gier
 
 `games.toml`. Dla nowej gry zwykłe `news` samo pobierze całą historię, bo jej

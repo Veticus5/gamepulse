@@ -6,10 +6,10 @@ from gamepulse.web.events import classify
 @pytest.mark.parametrize(
     "title, category",
     [
-        ("Path of Exile: Covens of Umbra is Now Available!", "release"),
-        ("Counter-Strike 2 Update", "update"),
-        ("Hotfix 1.2.3", "update"),
-        ("Path of Exile 1 3.30 Expansion Timeline", "release"),
+        ("Path of Exile: Covens of Umbra is Now Available!", "content_release"),
+        ("Counter-Strike 2 Update", "patch"),
+        ("Hotfix 1.2.3", "patch"),
+        ("Path of Exile 1 3.30 Expansion Timeline", "content_release"),
         ("Two Weeks Until ExileCon 2026!", "announcement"),
         ("Fan Art Competition Winners", "community"),
         ("Path of Exile 1: Covens of Umbra Twitch Drops", "community"),
@@ -25,8 +25,8 @@ def test_category_from_title(title, category):
 
 def test_priority_order_and_external_news():
     assert classify("Now Available", True)[1] > classify("Small Update", True)[1] > classify("Fan Art", True)[1]
-    assert classify("Now Available", False) == ("release", 0)
+    assert classify("Now Available", False) == ("content_release", 0)
 
 
 def test_steam_patchnotes_tag_wins_over_title():
-    assert classify("Fan Art and fixes", True, ["patchnotes"])[0] == "update"
+    assert classify("Fan Art and fixes", True, ["patchnotes"])[0] == "patch"
