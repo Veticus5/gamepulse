@@ -93,3 +93,20 @@ def fetch_review_histogram(client: httpx.Client, appid: int) -> dict:
     if body.get("success") != 1 or not isinstance(results, dict):
         raise SteamError(f"no review histogram for appid {appid}")
     return results
+
+
+def fetch_app_details(client: httpx.Client, appid: int) -> dict:
+    """Store page data for a game (name, studio, release date, genres, images).
+
+    A store endpoint, not part of the official Web API.
+    """
+    body = _get_json(
+        client,
+        f"{STORE_BASE}/api/appdetails",
+        {"appids": appid, "cc": "US", "l": "english"},
+    )
+    entry = body.get(str(appid))
+    data = entry.get("data") if isinstance(entry, dict) else None
+    if not isinstance(entry, dict) or entry.get("success") is not True or not isinstance(data, dict):
+        raise SteamError(f"no store details for appid {appid}")
+    return data

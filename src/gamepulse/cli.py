@@ -1,4 +1,4 @@
-"""Command line entry point: ``gamepulse ccu|news|reviews|fivem``."""
+"""Command line entry point: ``gamepulse ccu|news|reviews|meta|fivem|web``."""
 
 import argparse
 import fcntl
@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import IO
 
-from gamepulse import collect_ccu, collect_fivem, collect_news, collect_reviews
+from gamepulse import collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
 from gamepulse.config import load_games
 from gamepulse.steam import make_client
 
@@ -27,6 +27,7 @@ def _parser() -> argparse.ArgumentParser:
         help="walk the whole history (first run, new games, or after an interrupted run)",
     )
     sub.add_parser("reviews", parents=[steam], help="Steam review histogram snapshot")
+    sub.add_parser("meta", parents=[steam], help="Steam store metadata snapshot")
     sub.add_parser("fivem", parents=[data], help="FiveM total player counts (not from Steam)")
     return parser
 
@@ -67,6 +68,8 @@ def main(argv: list[str] | None = None) -> int:
             succeeded = collect_news.run(client, games, args.data_dir, full=args.full)
         elif args.command == "reviews":
             succeeded = collect_reviews.run(client, games, args.data_dir)
+        elif args.command == "meta":
+            succeeded = collect_meta.run(client, games, args.data_dir)
         else:
             succeeded = collect_fivem.run(client, args.data_dir)
     return 0 if succeeded else 1
