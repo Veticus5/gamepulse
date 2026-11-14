@@ -5,7 +5,7 @@ import logging
 import sys
 from pathlib import Path
 
-from gamepulse import collect_ccu, collect_news
+from gamepulse import collect_ccu, collect_news, collect_reviews
 from gamepulse.config import load_games
 from gamepulse.steam import make_client
 
@@ -23,6 +23,7 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="walk the whole history (first run, or after an interrupted one)",
     )
+    sub.add_parser("reviews", parents=[common], help="review histogram snapshot")
     return parser
 
 
@@ -39,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
             succeeded = collect_ccu.run(client, games, args.data_dir)
         elif args.command == "news":
             succeeded = collect_news.run(client, games, args.data_dir, full=args.full)
+        elif args.command == "reviews":
+            succeeded = collect_reviews.run(client, games, args.data_dir)
         else:  # pragma: no cover - argparse rejects unknown commands
             raise AssertionError(args.command)
     return 0 if succeeded else 1

@@ -36,3 +36,24 @@ def test_cli_missing_games_file_exits_one(monkeypatch, tmp_path, capsys):
     use_handler(monkeypatch, lambda request: httpx.Response(500))
     assert cli.main(["ccu", "--games", str(tmp_path / "nope.toml")]) == 1
     assert "nope.toml" in capsys.readouterr().err
+
+
+def test_cli_news_full_flag_reaches_collector(monkeypatch, args):
+    seen = {}
+
+    def fake_run(client, games, data_dir, *, full=False):
+        seen["full"] = full
+        return 1
+
+    monkeypatch.setattr(cli.collect_news, "run", fake_run)
+    assert cli.main(["news", "--full", *args]) == 0
+    assert seen["full"] is True
+
+
+def test_cli_reviews_runs_collector(monkeypatch, args, tmp_path):
+    use_handler(
+        monkeypatch,
+        lambda request: httpx.Response(200, json={"success": 1, "results": {"rollups": []}}),
+    )
+    assert cli.main(["reviews", *args]) == 0
+    assert (tmp_path / "data" / "raw" / "review_histogram" / "730.jsonl").exists()
