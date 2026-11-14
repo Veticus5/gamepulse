@@ -750,8 +750,18 @@ async function renderLabel(token) {
       } }, CATEGORY[type] || type)));
   }
   paintTags();
+  // Picking a type only marks it; nothing is saved until it is confirmed.
+  let chosen;  // undefined = nothing picked yet, null = skip
+  const choiceButtons = new Map();
+  const confirmButton = el("button", { class: "confirm", disabled: "", onclick: () => save(chosen) }, "Zatwierdź i przejdź dalej");
+  function choose(eventType) {
+    chosen = eventType;
+    for (const [type, button] of choiceButtons) button.classList.toggle("active", type === eventType);
+    confirmButton.disabled = false;
+    confirmButton.textContent = eventType === null ? "Pomiń ten news i przejdź dalej" : `Zatwierdź: ${CATEGORY[eventType] || eventType}`;
+  }
   async function save(eventType) {
-    if (busy) return;
+    if (busy || eventType === undefined) return;
     busy = true;
     try {
       const response = await fetch("/api/label", {
@@ -771,15 +781,16 @@ async function renderLabel(token) {
   labelKeys = (event) => {
     if (event.target instanceof HTMLInputElement || event.ctrlKey || event.metaKey || event.altKey) return;
     const index = "123456789".indexOf(event.key);
-    if (index >= 0 && index < data.event_types.length) save(data.event_types[index]);
-    else if (event.key === "0") save(null);
+    if (index >= 0 && index < data.event_types.length) choose(data.event_types[index]);
+    else if (event.key === "0") choose(null);
+    else if (event.key === "Enter") { event.preventDefault(); save(chosen); }
   };
   document.addEventListener("keydown", labelKeys);
   const link = safeUrl(item.url);
   view.replaceChildren(
     el("a", { class: "back", href: "#/" }, "← Wszystkie gry"),
     el("div", { class: "panel", style: "margin-top:14px" }, head,
-      el("p", { class: "muted" }, "Jeśli news dotyczy kilku rzeczy, najpierw zaznacz tagi dodatkowe, a potem wybierz typ główny, czyli to, o czym news jest przede wszystkim. Wybór typu głównego zapisuje i przechodzi dalej. Odpowiedź modelu jest ukryta. Klawisze 1–9 wybierają typ główny, 0 pomija news."),
+      el("p", { class: "muted" }, "Wybierz typ główny, czyli to, o czym news jest przede wszystkim, i ewentualne tagi dodatkowe. Wybór można zmieniać do woli; zapisuje go dopiero przycisk Zatwierdź. Odpowiedź modelu jest ukryta. Klawisze: 1–9 typ główny, 0 pomiń, Enter zatwierdza."),
       el("div", { class: "label-grid" },
         el("div", { class: "label-news" },
           el("div", { class: "muted" }, `${item.game} · ${dateFmt.format(item.date_ms)}`,
@@ -791,12 +802,20 @@ async function renderLabel(token) {
             el("div", { class: "muted fine" }, "Tagi dodatkowe (opcjonalne): o czym jeszcze jest ten news?"),
             tagChips),
           el("div", { class: "muted fine" }, "Typ główny:"),
-          data.event_types.map((type, index) =>
-            el("button", { onclick: () => save(type) },
+          data.event_types.map((type, index) => {
+            const button = el("button", { onclick: () => choose(type) },
               el("span", { class: "key" }, String(index + 1)),
-              el("span", {}, el("strong", {}, CATEGORY[type] || type), el("span", { class: "hint" }, TYPE_HINT[type] || "")))),
-          el("button", { class: "skip", onclick: () => save(null) },
-            el("span", { class: "key" }, "0"), el("span", {}, el("strong", {}, "Pomiń"), el("span", { class: "hint" }, "Nie da się ocenić albo news jest nieczytelny.")))))),
+              el("span", {}, el("strong", {}, CATEGORY[type] || type), el("span", { class: "hint" }, TYPE_HINT[type] || "")));
+            choiceButtons.set(type, button);
+            return button;
+          }),
+          (() => {
+            const button = el("button", { class: "skip", onclick: () => choose(null) },
+              el("span", { class: "key" }, "0"), el("span", {}, el("strong", {}, "Pomiń"), el("span", { class: "hint" }, "Nie da się ocenić albo news jest nieczytelny.")));
+            choiceButtons.set(null, button);
+            return button;
+          })(),
+          confirmButton))),
   );
 }
 
