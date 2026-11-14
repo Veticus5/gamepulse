@@ -3,7 +3,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from gamepulse import evaluate
+from gamepulse import classify, evaluate
 from gamepulse.config import Game
 from gamepulse.storage import append_jsonl, read_jsonl
 from gamepulse.web.app import create_app
@@ -68,6 +68,12 @@ def test_labelling_flow_hides_the_model_answer_and_lets_you_correct(data_dir, tm
     assert done["done"] == 2 and done["item"] is None
     client.post("/api/label", json={"gid": "730-1", "event_type": "patch"})  # a correction: the latest wins
     assert evaluate.load_labels(eval_dir) == {"730-1": "patch", "570-2": None}
+    assert evaluate.load_label_tags(eval_dir) == {"730-1": []}
+    ok = client.post("/api/label", json={"gid": "730-1", "event_type": "in_game_event", "secondary_types": ["store_item", "sale", "sale"]})
+    assert ok.status_code == 200
+    assert evaluate.load_label_tags(eval_dir) == {"730-1": ["store_item", "sale"]}
+    for bad in (["in_game_event"], ["other"], ["bogus"]):
+        assert client.post("/api/label", json={"gid": "730-1", "event_type": "in_game_event", "secondary_types": bad}).status_code == 400
 
 
 def test_run_classifies_only_missing_labelled_items(data_dir, tmp_path, client_for):
@@ -79,15 +85,28 @@ def test_run_classifies_only_missing_labelled_items(data_dir, tmp_path, client_f
     evaluate.save_label(eval_dir, "730-2", 730, "sale")
     evaluate.save_label(eval_dir, "570-0", 570, None)
     append_jsonl(data_dir / "derived" / "news_events" / "730.jsonl",
-                 [{"gid": "730-1", "appid": 730, "event_type": "patch", "model": "m", "prompt_version": "v1"}])
+                 [{"gid": "730-1", "appid": 730, "event_type": "patch", "model": "m",
+                   "prompt_version": classify.PROMPT_VERSION, "secondary_types": []}])
     calls = []
 
     def handler(request):
         calls.append(1)
-        answer = {"event_type": "patch", "effective_date": None, "summary": "s", "importance": "low", "confidence": 0.5}
+        answer = {"event_type": "patch", "secondary_types": ["sale"], "effective_date": None, "summary": "s", "importance": "low", "confidence": 0.5}
         return httpx.Response(200, json={"message": {"content": json.dumps(answer)}})
 
     result = evaluate.run(client_for(handler), GAMES, data_dir, eval_dir, model="m")
     assert len(calls) == 1  # only 730-2: 730-1 was already classified, 570-0 was skipped
     assert (result["compared"], result["correct"]) == (2, 1)
+    assert result["tags"]["compared"] == 0  # these labels were saved without tags
     assert "1/2" in evaluate.format_report(result, {"730-2": "Some title"}) and "Some title" in evaluate.format_report(result, {"730-2": "Some title"})
+
+
+def test_score_tags_compares_sets_and_ignores_labels_without_tags(tmp_path):
+    evaluate.save_label(tmp_path, "old", 1, "patch")  # labelled before tags existed
+    evaluate.save_label(tmp_path, "a", 1, "in_game_event", ["store_item", "sale"])
+    evaluate.save_label(tmp_path, "b", 1, "patch", [])
+    evaluate.save_label(tmp_path, "c", 1, None, None)
+    label_tags = evaluate.load_label_tags(tmp_path)
+    assert label_tags == {"a": ["store_item", "sale"], "b": []}
+    result = evaluate.score_tags(label_tags, {"a": ["sale", "community"], "b": [], "old": ["sale"]})
+    assert result == {"compared": 2, "identical": 1, "labelled": 2, "found": 1, "missed": 1, "extra": 1}

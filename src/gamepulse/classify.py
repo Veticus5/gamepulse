@@ -1,7 +1,8 @@
 """News classifier: one model call per news item, no tools, JSON out.
 
 Level B of the architecture plan ("model as a function"). The model reads
-one official news item and returns its type, the date the event takes
+one official news item and returns its main type, up to three secondary
+types (one post often covers several things), the date the event takes
 effect, a one-sentence summary and how much it matters. Code validates
 every answer before it is stored, and each call is logged.
 
@@ -26,7 +27,8 @@ from gamepulse.storage import append_jsonl, read_jsonl, utc_now_iso
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
+MAX_SECONDARY = 3
 DEFAULT_MODEL = "qwen3.8:27b"
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 MAX_CONTENT_CHARS = 6000
@@ -49,12 +51,13 @@ SCHEMA = {
     "type": "object",
     "properties": {
         "event_type": {"type": "string", "enum": list(EVENT_TYPES)},
+        "secondary_types": {"type": "array", "items": {"type": "string", "enum": list(EVENT_TYPES)}},
         "effective_date": {"type": ["string", "null"]},
         "summary": {"type": "string"},
         "importance": {"type": "string", "enum": list(IMPORTANCE)},
         "confidence": {"type": "number"},
     },
-    "required": ["event_type", "effective_date", "summary", "importance", "confidence"],
+    "required": ["event_type", "secondary_types", "effective_date", "summary", "importance", "confidence"],
 }
 
 SYSTEM_PROMPT = """\
@@ -74,7 +77,9 @@ event_type - exactly one of:
 - store_item: new cosmetics, skins, bundles, microtransactions, supporter packs, battle pass items sold in the game's shop.
 - community: fan art, contests, esports, tournaments, streams, Twitch drops, developer diaries, interviews, merchandise, soundtrack, surveys.
 - other: anything else.
-If a post fits several types, choose the one most likely to change how many people play.
+If a post fits several types, choose as event_type the one that is the post's main subject; when two are equally central, the one most likely to change how many people play.
+
+secondary_types - up to 3 other types from the same list that the post also clearly covers, most prominent first. Example: a weekly event post that also lists new shop cosmetics and discounts has event_type in_game_event and secondary_types ["store_item", "sale"]. Use an empty list when the post is about one thing. Never repeat event_type here, and never use "other".
 
 effective_date - the day the event takes effect for players, as YYYY-MM-DD. For something already live when the post was published, use the published date. For something scheduled, use the scheduled day; if the post gives no year, pick the one closest to the published date. Use null when there is no specific day.
 
@@ -148,6 +153,15 @@ def validate(answer: str, published: date) -> dict:
     if not isinstance(summary, str) or not summary.strip():
         raise ClassifyError("summary is empty")
 
+    raw_secondary = data.get("secondary_types")
+    if not isinstance(raw_secondary, list):
+        raise ClassifyError("secondary_types is not a list")
+    secondary = []
+    for value in raw_secondary:
+        # Unknown, repeated or redundant tags are dropped; the main type decides validity.
+        if value in EVENT_TYPES and value not in ("other", data["event_type"]) and value not in secondary:
+            secondary.append(value)
+
     effective = None
     raw_date = data.get("effective_date")
     if isinstance(raw_date, str):
@@ -160,6 +174,7 @@ def validate(answer: str, published: date) -> dict:
             effective = parsed.isoformat()
     return {
         "event_type": data["event_type"],
+        "secondary_types": secondary[:MAX_SECONDARY],
         "effective_date": effective,
         "summary": " ".join(summary.split())[:300],
         "importance": data["importance"],

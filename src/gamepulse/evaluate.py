@@ -67,11 +67,40 @@ def load_labels(eval_dir: Path) -> dict[str, str | None]:
     return {row["gid"]: row.get("event_type") for row in read_jsonl(eval_dir / LABELS_FILE) if "gid" in row}
 
 
-def save_label(eval_dir: Path, gid: str, appid: int, event_type: str | None) -> None:
-    append_jsonl(
-        eval_dir / LABELS_FILE,
-        [{"gid": gid, "appid": appid, "event_type": event_type, "labeled_at": utc_now_iso()}],
-    )
+def load_label_tags(eval_dir: Path) -> dict[str, list[str]]:
+    """Secondary tags of the latest label per item. Labels made before tags
+    existed carry none and are left out, so they do not count as "no tags"."""
+    tags: dict[str, list[str]] = {}
+    for row in read_jsonl(eval_dir / LABELS_FILE):
+        if "gid" not in row:
+            continue
+        if isinstance(row.get("secondary_types"), list) and row.get("event_type"):
+            tags[row["gid"]] = row["secondary_types"]
+        else:
+            tags.pop(row["gid"], None)
+    return tags
+
+
+def save_label(
+    eval_dir: Path, gid: str, appid: int, event_type: str | None, secondary_types: list[str] | None = None
+) -> None:
+    row = {"gid": gid, "appid": appid, "event_type": event_type, "labeled_at": utc_now_iso()}
+    if secondary_types is not None:
+        row["secondary_types"] = secondary_types
+    append_jsonl(eval_dir / LABELS_FILE, [row])
+
+
+def score_tags(label_tags: dict[str, list[str]], predicted_tags: dict[str, list[str]]) -> dict:
+    """How well the model's secondary tags match the labeller's, as sets."""
+    pairs = [(set(tags), set(predicted_tags[gid])) for gid, tags in label_tags.items() if gid in predicted_tags]
+    return {
+        "compared": len(pairs),
+        "identical": sum(1 for mine, model in pairs if mine == model),
+        "labelled": sum(len(mine) for mine, _ in pairs),
+        "found": sum(len(mine & model) for mine, model in pairs),
+        "missed": sum(len(mine - model) for mine, model in pairs),
+        "extra": sum(len(model - mine) for mine, model in pairs),
+    }
 
 
 def score(labels: dict[str, str | None], predictions: dict[str, str]) -> dict:
@@ -109,6 +138,7 @@ def run(client: httpx.Client, games: list[Game], data_dir: Path, eval_dir: Path,
     appid_of = {row["gid"]: row["appid"] for row in load_sample(eval_dir)}
     by_appid = {game.appid: game for game in games}
     predictions: dict[str, str] = {}
+    predicted_tags: dict[str, list[str]] = {}
     for appid in sorted({appid_of[gid] for gid in labels if gid in appid_of}):
         game = by_appid.get(appid)
         if game is None:
@@ -124,7 +154,10 @@ def run(client: httpx.Client, games: list[Game], data_dir: Path, eval_dir: Path,
             classify.classify_many(client, data_dir, game, missing, model)
             done = classify.load_events(data_dir, appid, model=model)
         predictions.update({gid: done[gid]["event_type"] for gid in wanted if gid in done})
-    return score(labels, predictions)
+        predicted_tags.update({gid: done[gid].get("secondary_types") or [] for gid in wanted if gid in done})
+    result = score(labels, predictions)
+    result["tags"] = score_tags(load_label_tags(eval_dir), predicted_tags)
+    return result
 
 
 def format_report(result: dict, titles: dict[str, str]) -> str:
@@ -139,6 +172,13 @@ def format_report(result: dict, titles: dict[str, str]) -> str:
     for event_type, row in result["per_type"].items():
         fmt = lambda v: "—" if v is None else f"{v:.0%}"
         lines.append(f"{event_type:<18}{row['labelled']:>10}{row['predicted']:>8}{fmt(row['precision']):>10}{fmt(row['recall']):>9}")
+    tags = result.get("tags")
+    if tags and tags["compared"]:
+        lines += [
+            "",
+            f"Tagi dodatkowe (na {tags['compared']} newsach oznaczonych z tagami): identyczny zestaw w {tags['identical']}",
+            f"  Twoich tagów: {tags['labelled']}; model trafił {tags['found']}, pominął {tags['missed']}, dodał od siebie {tags['extra']}",
+        ]
     if result["disagreements"]:
         lines += ["", "Rozbieżności (Twoja etykieta → model):"]
         for item in result["disagreements"]:

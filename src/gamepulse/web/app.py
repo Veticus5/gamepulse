@@ -19,6 +19,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 class Label(BaseModel):
     gid: str
     event_type: str | None = None  # None = skipped by the labeller
+    secondary_types: list[str] = []
 
 
 def create_app(data_dir: Path, games: list[Game], eval_dir: Path = Path("eval")) -> FastAPI:
@@ -85,7 +86,13 @@ def create_app(data_dir: Path, games: list[Game], eval_dir: Path = Path("eval"))
             raise HTTPException(404, "news item is not in the sample")
         if label.event_type is not None and label.event_type not in EVENT_TYPES:
             raise HTTPException(400, "unknown event type")
-        evaluate.save_label(eval_dir, label.gid, appids[label.gid], label.event_type)
+        secondary = list(dict.fromkeys(label.secondary_types))
+        if any(t not in EVENT_TYPES or t in ("other", label.event_type) for t in secondary):
+            raise HTTPException(400, "secondary types must be known, and differ from the main type")
+        evaluate.save_label(
+            eval_dir, label.gid, appids[label.gid], label.event_type,
+            secondary if label.event_type is not None else None,
+        )
         return {"ok": True}
 
     @app.get("/")

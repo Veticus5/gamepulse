@@ -325,6 +325,7 @@ class Store:
             "priority": priority,
             "source": source,
             "summary": event.get("summary") if event else None,
+            "secondary": list(event.get("secondary_types") or []) if event else [],
         }
 
     def game(self, appid: int, range_key: str, now_ms: int) -> dict | None:

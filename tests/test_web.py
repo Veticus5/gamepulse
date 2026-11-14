@@ -226,7 +226,7 @@ def test_model_labels_replace_rules_and_move_markers_to_the_effective_date(data_
         [
             {"gid": "a", "appid": 730, "event_type": "community", "importance": "low", "summary": "stare", "effective_date": None},
             {"gid": "a", "appid": 730, "event_type": "content_release", "importance": "high",
-             "summary": "Nowa operacja.", "effective_date": effective},
+             "summary": "Nowa operacja.", "effective_date": effective, "secondary_types": ["sale"]},
             {"gid": "b", "appid": 730, "event_type": "patch", "importance": "high", "summary": "x", "effective_date": None},
         ],
     )
@@ -234,6 +234,7 @@ def test_model_labels_replace_rules_and_move_markers_to_the_effective_date(data_
     item = store.news_item(730, "a")
     assert (item["category"], item["priority"], item["source"]) == ("content_release", 3, "model")
     assert item["summary"] == "Nowa operacja." and item["effective_date"] == effective
+    assert item["secondary"] == ["sale"] and store.news_item(730, "old")["secondary"] == []
     assert store.news_item(730, "b")["source"] == "rules"  # not from the developer: labels are ignored
     assert store.news_item(730, "old")["source"] == "rules"
     result = store.game(730, "24h", NOW)

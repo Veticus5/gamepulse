@@ -44,8 +44,8 @@ Metadane nie mają timera: po dodaniu gry uruchom `uv run gamepulse meta`.
 
 `uv run gamepulse classify` czyta oficjalne newsy lokalnym modelem przez Ollamę
 (domyślnie `qwen3.8:27b`, ostatnie 90 dni, najnowsze najpierw) i zapisuje dla
-każdego typ wydarzenia, datę wejścia w życie, jednozdaniowe streszczenie,
-ważność i pewność. Jedno wywołanie na news, bez narzędzi, wymuszony JSON.
+każdego typ główny, do trzech tagów dodatkowych (jeden news często dotyczy kilku
+rzeczy), datę wejścia w życie, jednozdaniowe streszczenie, ważność i pewność. Jedno wywołanie na news, bez narzędzi, wymuszony JSON.
 
 - Wyniki: `data/derived/news_events/<appid>.jsonl`, raz na news, model i wersję promptu.
 - Każde wywołanie (także nieudane) trafia do `data/derived/agent_runs/RRRR-MM-DD.jsonl`
@@ -61,10 +61,11 @@ ważność i pewność. Jedno wywołanie na news, bez narzędzi, wymuszony JSON.
 
 1. `uv run gamepulse eval-sample` losuje 100 oficjalnych newsów z ostatniego roku
    do `eval/news_sample.jsonl` (plik jest w repozytorium i nie jest nadpisywany).
-2. Na stronie `#/label` interfejsu oznaczasz je ręcznie; odpowiedź modelu jest ukryta.
+2. Na stronie `#/label` interfejsu oznaczasz je ręcznie: opcjonalne tagi dodatkowe,
+   potem typ główny. Odpowiedź modelu jest ukryta.
    Etykiety trafiają do `eval/news_labels.jsonl`.
 3. `uv run gamepulse eval-classifier` porównuje model z etykietami: trafność,
-   precyzja i czułość per typ oraz lista rozbieżności. Uruchamiaj po każdej
+   precyzja i czułość per typ, zgodność tagów dodatkowych oraz lista rozbieżności. Uruchamiaj po każdej
    zmianie promptu lub modelu.
 
 ## Lista gier

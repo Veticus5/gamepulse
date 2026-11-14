@@ -234,6 +234,12 @@ function badge(item) {
   }, item.official ? (CATEGORY[item.category] || "Inne") + (item.source === "model" ? "" : " ?") : "Zewnętrzny");
 }
 
+/** Main type plus the smaller secondary tags. */
+function badges(item) {
+  return el("span", { class: "badges" }, badge(item),
+    (item.secondary || []).map((type) => el("span", { class: "badge tag", title: "Tag dodatkowy: news dotyczy też tego" }, CATEGORY[type] || type)));
+}
+
 function openDrawer(...nodes) {
   drawer.hidden = false;
   drawerBody.replaceChildren(...nodes);
@@ -251,7 +257,7 @@ async function openNews(appid, gid, back) {
         `${dateTimeFmt.format(item.date_ms)} · ${item.feedlabel || ""}`,
         link ? [" · ", el("a", { href: link, target: "_blank", rel: "noopener noreferrer" }, "źródło")] : null),
       el("div", { class: "labelbox" },
-        el("div", {}, badge(item),
+        el("div", {}, badges(item),
           item.effective_date ? el("span", { class: "muted" }, ` Data wydarzenia: ${dateFmt.format(new Date(item.effective_date + "T12:00:00Z"))}`) : null),
         item.summary ? el("div", {}, item.summary) : null,
         el("div", { class: "muted fine" }, !item.official ? "News spoza studia; nie jest klasyfikowany."
@@ -272,7 +278,7 @@ function openDay(appid, marker, period) {
     el("ul", { class: "events" }, marker.items.map((item) =>
       el("li", {}, el("button", { onclick: () => openNews(appid, item.gid, reopen) },
         el("span", { class: "title" }, item.title || "(bez tytułu)"),
-        el("span", { class: "sub" }, badge(item), period ? dateFmt.format(item.date_ms) : timeFmt.format(item.date_ms)))))),
+        el("span", { class: "sub" }, badges(item), period ? dateFmt.format(item.date_ms) : timeFmt.format(item.date_ms)))))),
     marker.count > marker.items.length
       ? el("p", { class: "muted" }, `Pokazano ${marker.items.length} najważniejszych z ${marker.count}.`) : null,
   );
@@ -500,7 +506,7 @@ function newsRow(appid, item) {
     el("span", { class: "date" }, dateFmt.format(item.date_ms)),
     el("span", { class: "title" }, item.title || "(bez tytułu)",
       item.summary ? el("span", { class: "summary" }, item.summary) : null),
-    badge(item)));
+    badges(item)));
 }
 
 /** The full archive: search, kind filter and paging, loaded only on demand. */
@@ -734,6 +740,16 @@ async function renderLabel(token) {
   }
   const item = data.item;
   let busy = false;
+  const extra = new Set();
+  const tagChips = el("div", { class: "chips" });
+  function paintTags() {
+    tagChips.replaceChildren(...data.event_types.filter((type) => type !== "other").map((type) =>
+      el("button", { class: `chip ${extra.has(type) ? "active" : ""}`, onclick: () => {
+        if (extra.has(type)) extra.delete(type); else extra.add(type);
+        paintTags();
+      } }, CATEGORY[type] || type)));
+  }
+  paintTags();
   async function save(eventType) {
     if (busy) return;
     busy = true;
@@ -741,7 +757,8 @@ async function renderLabel(token) {
       const response = await fetch("/api/label", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gid: item.gid, event_type: eventType }),
+        // A tag equal to the main type adds nothing, so it is left out.
+        body: JSON.stringify({ gid: item.gid, event_type: eventType, secondary_types: eventType ? [...extra].filter((t) => t !== eventType) : [] }),
       });
       if (!response.ok) throw new Error(String(response.status));
       await renderLabel(renderToken);
@@ -762,7 +779,7 @@ async function renderLabel(token) {
   view.replaceChildren(
     el("a", { class: "back", href: "#/" }, "← Wszystkie gry"),
     el("div", { class: "panel", style: "margin-top:14px" }, head,
-      el("p", { class: "muted" }, "Wybierz typ, który najlepiej opisuje news. Odpowiedź modelu jest ukryta, żeby nie wpływała na Twoją ocenę. Możesz używać klawiszy 1–9, a 0 pomija news."),
+      el("p", { class: "muted" }, "Jeśli news dotyczy kilku rzeczy, najpierw zaznacz tagi dodatkowe, a potem wybierz typ główny, czyli to, o czym news jest przede wszystkim. Wybór typu głównego zapisuje i przechodzi dalej. Odpowiedź modelu jest ukryta. Klawisze 1–9 wybierają typ główny, 0 pomija news."),
       el("div", { class: "label-grid" },
         el("div", { class: "label-news" },
           el("div", { class: "muted" }, `${item.game} · ${dateFmt.format(item.date_ms)}`,
@@ -770,6 +787,10 @@ async function renderLabel(token) {
           el("h3", {}, item.title || "(bez tytułu)"),
           el("div", { class: "body" }, plainText(item.contents) || "Brak treści.")),
         el("div", { class: "label-choices" },
+          el("div", { class: "tagbox" },
+            el("div", { class: "muted fine" }, "Tagi dodatkowe (opcjonalne): o czym jeszcze jest ten news?"),
+            tagChips),
+          el("div", { class: "muted fine" }, "Typ główny:"),
           data.event_types.map((type, index) =>
             el("button", { onclick: () => save(type) },
               el("span", { class: "key" }, String(index + 1)),
@@ -800,7 +821,11 @@ async function route() {
     } else {
       if (!view.hasChildNodes()) view.replaceChildren(el("div", { class: "empty" }, "Wczytywanie…"));
       await renderOverview(token);
-      refreshTimer = setInterval(() => renderOverview(renderToken).catch(() => {}), 60000);
+      // Only the page still on screen may refresh itself; a render that was
+      // overtaken by another navigation must not start repainting later.
+      if (token === renderToken) {
+        refreshTimer = setInterval(() => renderOverview(renderToken).catch(() => {}), 60000);
+      }
     }
   } catch (error) {
     if (token !== renderToken) return;

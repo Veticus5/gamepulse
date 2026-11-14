@@ -13,6 +13,7 @@ GAME = Game(730, "Counter-Strike 2")
 NOW = int(time.time())
 GOOD = {
     "event_type": "content_release",
+    "secondary_types": ["sale"],
     "effective_date": "2026-11-13",
     "summary": "Dodatek  wchodzi\ndo gry.",
     "importance": "high",
@@ -54,7 +55,7 @@ def test_build_messages_truncates_and_wraps_the_post():
 
 def test_validate_accepts_and_normalises():
     result = classify.validate(json.dumps(GOOD), date(2026, 11, 1))
-    assert result == {"event_type": "content_release", "effective_date": "2026-11-13",
+    assert result == {"event_type": "content_release", "secondary_types": ["sale"], "effective_date": "2026-11-13",
                       "summary": "Dodatek wchodzi do gry.", "importance": "high", "confidence": 0.9}
 
 
@@ -64,6 +65,8 @@ def test_validate_accepts_and_normalises():
     {"confidence": "high"},
     {"confidence": True},
     {"summary": "   "},
+    {"secondary_types": "sale"},
+    {"secondary_types": None},
 ])
 def test_validate_rejects_bad_fields(patch):
     with pytest.raises(classify.ClassifyError):
@@ -89,6 +92,17 @@ def test_validate_keeps_only_plausible_dates(raw, expected):
     assert result["effective_date"] == expected
 
 
+@pytest.mark.parametrize("raw, expected", [
+    ([], []),
+    (["store_item", "sale"], ["store_item", "sale"]),
+    (["content_release", "sale", "sale", "other", "nonsense", 7], ["sale"]),  # main type, repeats, junk dropped
+    (["patch", "sale", "community", "store_item"], ["patch", "sale", "community"]),  # at most three
+])
+def test_validate_cleans_secondary_types(raw, expected):
+    result = classify.validate(json.dumps({**GOOD, "secondary_types": raw}), date(2026, 11, 1))
+    assert result["secondary_types"] == expected
+
+
 def test_validate_clamps_confidence():
     assert classify.validate(json.dumps({**GOOD, "confidence": 7}), date(2026, 11, 1))["confidence"] == 1.0
 
@@ -103,7 +117,7 @@ def test_run_classifies_recent_official_news_once(tmp_path, client_for):
     events = read_jsonl(classify.events_path(tmp_path, 730))
     assert [e["gid"] for e in events] == ["new", "older"]  # newest first; no press, nothing ancient
     assert events[0]["model"] == "m" and events[0]["prompt_version"] == classify.PROMPT_VERSION
-    assert events[0]["event_type"] == "content_release"
+    assert events[0]["event_type"] == "content_release" and events[0]["secondary_types"] == ["sale"]
     assert calls[0]["think"] is False and calls[0]["format"] == classify.SCHEMA and calls[0]["options"]["temperature"] == 0
     # Second run: nothing left to do, no calls, still a success.
     calls.clear()
@@ -141,6 +155,14 @@ def test_run_limit_counts_across_games(tmp_path, client_for):
     append_jsonl(tmp_path / "raw" / "news" / "570.jsonl", [news("c", 1), news("d", 2)])
     assert classify.run(client_for(ollama()), [GAME, other], tmp_path, model="m", limit=3) == 3
     assert len(read_jsonl(classify.events_path(tmp_path, 570))) == 1
+
+
+def test_older_prompt_version_is_classified_again(tmp_path, client_for):
+    append_jsonl(tmp_path / "raw" / "news" / "730.jsonl", [news("a", 1)])
+    append_jsonl(classify.events_path(tmp_path, 730),
+                 [{"gid": "a", "appid": 730, "event_type": "patch", "model": "m", "prompt_version": "v1"}])
+    assert classify.run(client_for(ollama()), [GAME], tmp_path, model="m") == 1
+    assert classify.load_events(tmp_path, 730)["a"]["prompt_version"] == classify.PROMPT_VERSION
 
 
 def test_load_events_returns_latest_per_gid(tmp_path):
