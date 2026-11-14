@@ -1,0 +1,343 @@
+"""Read model for the interface: DuckDB over the raw JSONL files.
+
+Tables live in memory and are reloaded when the files behind them change,
+so the interface always shows what the collectors last wrote without
+re-parsing everything on each request.
+"""
+
+import threading
+from pathlib import Path
+
+import duckdb
+
+from gamepulse.config import Game
+from gamepulse.storage import read_jsonl
+
+MINUTE = 60_000
+HOUR = 60 * MINUTE
+DAY = 24 * HOUR
+
+RANGES = {"24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY, "1y": 365 * DAY, "all": None}
+FIVEM_LIVE_SOURCE = "https://static.cfx.re/runtime/counts.json"
+# A collector run is expected every 5 minutes; anything longer than this
+# between two runs counts as a gap (the computer was off, or Steam was down).
+GAP_THRESHOLD = 15 * MINUTE
+
+
+def _sql_list(files: list[Path]) -> str:
+    return "[" + ", ".join("'" + str(f).replace("'", "''") + "'" for f in files) + "]"
+
+
+def _bucket_for(span_ms: int) -> int | None:
+    """Bucket width for a chart covering ``span_ms``; None keeps raw points."""
+    if span_ms <= 2 * DAY:
+        return None
+    if span_ms <= 45 * DAY:
+        return HOUR
+    return DAY
+
+
+def _pct(up: int, down: int) -> float | None:
+    total = up + down
+    return round(100 * up / total, 1) if total else None
+
+
+class Store:
+    def __init__(self, data_dir: Path, games: list[Game]):
+        self.data_dir = data_dir
+        self.games = games
+        self._by_appid = {g.appid: g for g in games}
+        self._con = duckdb.connect(":memory:")
+        self._lock = threading.Lock()
+        self._signatures: dict[str, tuple] = {}
+        self._reviews: dict[int, dict] = {}
+        self._meta: dict[int, dict] = {}
+
+    # ------------------------------------------------------------ loading
+
+    def _files(self, sub: str) -> list[Path]:
+        return sorted((self.data_dir / "raw" / sub).glob("*.jsonl"))
+
+    def _changed(self, name: str, files: list[Path]) -> bool:
+        signature = tuple((f.name, f.stat().st_mtime_ns, f.stat().st_size) for f in files)
+        if self._signatures.get(name) == signature:
+            return False
+        self._signatures[name] = signature
+        return True
+
+    def _load_table(self, table: str, files: list[Path], empty_schema: str, select: str) -> None:
+        if not files:
+            self._con.execute(f"CREATE OR REPLACE TABLE {table} ({empty_schema})")
+            return
+        self._con.execute(f"CREATE OR REPLACE TABLE {table} AS {select.format(files=_sql_list(files))}")
+
+    def _refresh(self) -> None:
+        files = self._files("ccu")
+        if self._changed("ccu", files):
+            self._load_table(
+                "ccu",
+                files,
+                "ts_ms BIGINT, appid BIGINT, player_count BIGINT",
+                """
+                SELECT epoch_ms(CAST(ts AS TIMESTAMPTZ)) AS ts_ms, appid, player_count
+                FROM read_json({files}, format='newline_delimited', ignore_errors=true,
+                     columns={{ts:'VARCHAR', appid:'BIGINT', player_count:'BIGINT', ok:'BOOLEAN'}})
+                WHERE ok AND player_count IS NOT NULL AND ts IS NOT NULL
+                """,
+            )
+        files = self._files("fivem")
+        if self._changed("fivem", files):
+            self._load_table(
+                "fivem",
+                files,
+                "ts_ms BIGINT, players BIGINT",
+                f"""
+                SELECT epoch_ms(CAST(ts AS TIMESTAMPTZ)) AS ts_ms, counts[1] AS players
+                FROM read_json({{files}}, format='newline_delimited', ignore_errors=true,
+                     columns={{{{ts:'VARCHAR', url:'VARCHAR', counts:'BIGINT[]', ok:'BOOLEAN'}}}})
+                WHERE ok AND url = '{FIVEM_LIVE_SOURCE}' AND counts[1] IS NOT NULL
+                """,
+            )
+        files = self._files("news")
+        if self._changed("news", files):
+            self._load_table(
+                "news",
+                files,
+                "gid VARCHAR, appid BIGINT, title VARCHAR, date_ms BIGINT, feedlabel VARCHAR, "
+                "feed_type BIGINT, url VARCHAR, author VARCHAR, contents VARCHAR",
+                """
+                SELECT gid, any_value(appid) AS appid, any_value(title) AS title,
+                       any_value(date) * 1000 AS date_ms, any_value(feedlabel) AS feedlabel,
+                       any_value(feed_type) AS feed_type, any_value(url) AS url,
+                       any_value(author) AS author, any_value(contents) AS contents
+                FROM read_json({files}, format='newline_delimited', ignore_errors=true,
+                     columns={{gid:'VARCHAR', appid:'BIGINT', title:'VARCHAR', date:'BIGINT',
+                              feedlabel:'VARCHAR', feed_type:'BIGINT', url:'VARCHAR',
+                              author:'VARCHAR', contents:'VARCHAR'}})
+                WHERE gid IS NOT NULL AND date IS NOT NULL AND appid IS NOT NULL
+                GROUP BY gid
+                """,
+            )
+        files = self._files("review_histogram")
+        if self._changed("reviews", files):
+            self._reviews = self._latest_snapshots(files, "results")
+        files = self._files("appdetails")
+        if self._changed("meta", files):
+            self._meta = self._latest_snapshots(files, "details")
+
+    @staticmethod
+    def _latest_snapshots(files: list[Path], key: str) -> dict[int, dict]:
+        latest = {}
+        for path in files:
+            rows = [r for r in read_jsonl(path) if isinstance(r.get(key), dict)]
+            if rows and path.stem.isdigit():
+                latest[int(path.stem)] = rows[-1][key]
+        return latest
+
+    def _rows(self, sql: str, params: list | None = None) -> list[tuple]:
+        return self._con.execute(sql, params or []).fetchall()
+
+    # ------------------------------------------------------------ helpers
+
+    def _meta_for(self, appid: int) -> dict:
+        details = self._meta.get(appid, {})
+        release = details.get("release_date") or {}
+        return {
+            "appid": appid,
+            "name": self._by_appid[appid].name,
+            "image": details.get("header_image")
+            or f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg",
+            "developers": details.get("developers") or [],
+            "publishers": details.get("publishers") or [],
+            "release_date": release.get("date") or None,
+            "genres": [g.get("description") for g in details.get("genres") or [] if g.get("description")],
+            "is_free": details.get("is_free"),
+            "description": details.get("short_description") or None,
+            "store_url": f"https://store.steampowered.com/app/{appid}/",
+        }
+
+    def _review_summary(self, appid: int) -> dict:
+        results = self._reviews.get(appid, {})
+
+        def total(rows):
+            up = sum(int(r.get("recommendations_up") or 0) for r in rows or [])
+            down = sum(int(r.get("recommendations_down") or 0) for r in rows or [])
+            return {"up": up, "down": down, "pct": _pct(up, down)}
+
+        return {"recent": total(results.get("recent")), "all": total(results.get("rollups"))}
+
+    # ------------------------------------------------------------ queries
+
+    def overview(self) -> dict:
+        with self._lock:
+            self._refresh()
+            now = self._rows("SELECT max(ts_ms) FROM ccu")[0][0]
+            latest = {
+                appid: (players, ts)
+                for appid, players, ts in self._rows(
+                    "SELECT appid, arg_max(player_count, ts_ms), max(ts_ms) FROM ccu GROUP BY appid"
+                )
+            }
+            day_ago = dict(
+                self._rows(
+                    """
+                    WITH latest AS (SELECT appid, max(ts_ms) AS t FROM ccu GROUP BY appid)
+                    SELECT c.appid, arg_min(c.player_count, abs(c.ts_ms - (l.t - ?)))
+                    FROM ccu c JOIN latest l USING (appid)
+                    WHERE abs(c.ts_ms - (l.t - ?)) <= ?
+                    GROUP BY c.appid
+                    """,
+                    [DAY, DAY, 45 * MINUTE],
+                )
+            )
+            sparks: dict[int, list] = {}
+            if now is not None:
+                for appid, bucket, value in self._rows(
+                    """
+                    SELECT appid, ts_ms - ts_ms % ? AS b, round(avg(player_count))
+                    FROM ccu WHERE ts_ms >= ? GROUP BY appid, b ORDER BY appid, b
+                    """,
+                    [30 * MINUTE, now - DAY],
+                ):
+                    sparks.setdefault(appid, []).append([bucket, int(value)])
+            last_news = {
+                appid: {"title": title, "date_ms": date}
+                for appid, title, date in self._rows(
+                    "SELECT appid, arg_max(title, date_ms), max(date_ms) FROM news "
+                    "WHERE feed_type = 1 GROUP BY appid"
+                )
+            }
+            runs = [r[0] for r in self._rows(
+                "SELECT DISTINCT ts_ms - ts_ms % ? AS run FROM ccu ORDER BY run", [5 * MINUTE]
+            )]
+            fivem_latest = self._rows("SELECT arg_max(players, ts_ms), max(ts_ms) FROM fivem")[0]
+            fivem_spark = []
+            if fivem_latest[1] is not None:
+                fivem_spark = [
+                    [b, int(v)]
+                    for b, v in self._rows(
+                        "SELECT ts_ms - ts_ms % ? AS b, round(avg(players)) FROM fivem "
+                        "WHERE ts_ms >= ? GROUP BY b ORDER BY b",
+                        [30 * MINUTE, fivem_latest[1] - DAY],
+                    )
+                ]
+
+            games = []
+            for game in self.games:
+                players, ts = latest.get(game.appid, (None, None))
+                before = day_ago.get(game.appid)
+                change = None
+                if players is not None and before:
+                    change = round(100 * (players - before) / before, 1)
+                games.append(
+                    {
+                        **self._meta_for(game.appid),
+                        "players": players,
+                        "players_ts": ts,
+                        "change_24h": change,
+                        "spark": sparks.get(game.appid, []),
+                        "reviews": self._review_summary(game.appid),
+                        "last_news": last_news.get(game.appid),
+                    }
+                )
+            games.sort(key=lambda g: (g["players"] is None, -(g["players"] or 0)))
+
+            recent_runs = [r for r in runs if now is not None and r >= now - DAY]
+            gaps = sum(1 for a, b in zip(recent_runs, recent_runs[1:]) if b - a > GAP_THRESHOLD)
+            return {
+                "status": {
+                    "first_ts": runs[0] if runs else None,
+                    "last_ts": now,
+                    "runs_24h": len(recent_runs),
+                    "gaps_24h": gaps,
+                },
+                "games": games,
+                "fivem": {
+                    "players": fivem_latest[0],
+                    "players_ts": fivem_latest[1],
+                    "spark": fivem_spark,
+                },
+            }
+
+    def game(self, appid: int, range_key: str, now_ms: int) -> dict | None:
+        if appid not in self._by_appid or range_key not in RANGES:
+            return None
+        with self._lock:
+            self._refresh()
+            span = RANGES[range_key]
+            results = self._reviews.get(appid, {})
+            if span is None:
+                starts = [r["date"] * 1000 for r in results.get("rollups") or [] if "date" in r]
+                first_ccu = self._rows("SELECT min(ts_ms) FROM ccu WHERE appid = ?", [appid])[0][0]
+                first_news = self._rows("SELECT min(date_ms) FROM news WHERE appid = ?", [appid])[0][0]
+                candidates = [v for v in (*starts, first_ccu, first_news) if v is not None]
+                since = min(candidates) if candidates else now_ms - 30 * DAY
+            else:
+                since = now_ms - span
+
+            bucket = _bucket_for(now_ms - since)
+            if bucket is None:
+                ccu = self._rows(
+                    "SELECT ts_ms, player_count FROM ccu WHERE appid = ? AND ts_ms >= ? ORDER BY ts_ms",
+                    [appid, since],
+                )
+            else:
+                ccu = self._rows(
+                    "SELECT ts_ms - ts_ms % ? AS b, round(avg(player_count)) FROM ccu "
+                    "WHERE appid = ? AND ts_ms >= ? GROUP BY b ORDER BY b",
+                    [bucket, appid, since],
+                )
+            news = self._rows(
+                "SELECT gid, title, date_ms, feed_type, feedlabel, url FROM news "
+                "WHERE appid = ? AND date_ms >= ? ORDER BY date_ms DESC",
+                [appid, since],
+            )
+            # Daily counts exist only for the last 30 days; older history is monthly.
+            daily = span is not None and span <= 30 * DAY
+            source = results.get("recent") if daily else results.get("rollups")
+            reviews = [
+                [r["date"] * 1000, int(r.get("recommendations_up") or 0), int(r.get("recommendations_down") or 0)]
+                for r in source or []
+                if isinstance(r.get("date"), int) and r["date"] * 1000 >= (since if daily else since - 31 * DAY)
+            ]
+            return {
+                "meta": self._meta_for(appid),
+                "range": {"key": range_key, "from": since, "to": now_ms},
+                "ccu": [[int(t), int(v)] for t, v in ccu],
+                "ccu_bucket_ms": bucket,
+                "reviews": {"granularity": "day" if daily else "month", "points": reviews},
+                "review_summary": self._review_summary(appid),
+                "news": [
+                    {
+                        "gid": gid,
+                        "title": title,
+                        "date_ms": date,
+                        "official": feed_type == 1,
+                        "feedlabel": feedlabel,
+                        "url": url,
+                    }
+                    for gid, title, date, feed_type, feedlabel, url in news
+                ],
+            }
+
+    def news_item(self, appid: int, gid: str) -> dict | None:
+        with self._lock:
+            self._refresh()
+            rows = self._rows(
+                "SELECT title, date_ms, feed_type, feedlabel, url, author, contents FROM news "
+                "WHERE appid = ? AND gid = ?",
+                [appid, gid],
+            )
+        if not rows:
+            return None
+        title, date, feed_type, feedlabel, url, author, contents = rows[0]
+        return {
+            "gid": gid,
+            "title": title,
+            "date_ms": date,
+            "official": feed_type == 1,
+            "feedlabel": feedlabel,
+            "url": url,
+            "author": author,
+            "contents": contents or "",
+        }

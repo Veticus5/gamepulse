@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "gamepulse-web",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "gamepulse", "web"],
+      "port": 8765
+    }
+  ]
+}

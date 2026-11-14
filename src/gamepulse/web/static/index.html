@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GamePulse</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">GamePulse</a>
+    <div id="status" class="status" aria-live="polite"></div>
+  </header>
+  <main id="view"></main>
+  <aside id="drawer" class="drawer" hidden>
+    <button id="drawer-close" class="drawer-close" aria-label="Zamknij">×</button>
+    <div id="drawer-body"></div>
+  </aside>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

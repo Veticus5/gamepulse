@@ -13,12 +13,27 @@ uv run gamepulse news           # nowe newsy (Steam)
 uv run gamepulse news --full    # cała historia newsów
 uv run gamepulse reviews        # histogram recenzji (Steam)
 uv run gamepulse fivem          # łączna liczba graczy FiveM (poza Steamem)
+uv run gamepulse meta           # metadane gier ze sklepu Steam (studio, premiera, gatunki)
+uv run gamepulse web            # interfejs pod http://127.0.0.1:8765
 uv run pytest -q                # testy, bez sieci
 ```
 
 Kod wyjścia: 0, gdy udała się co najmniej jedna gra lub źródło; 1, gdy żadna
 albo gdy nie da się wczytać listy gier; 2 przy błędnych argumentach.
 Jeśli ten sam kolektor już działa, drugie uruchomienie nic nie robi i kończy się kodem 0.
+
+## Interfejs
+
+`uv run gamepulse web` uruchamia lokalną stronę (tylko z tego komputera):
+
+- strona główna: kafelki gier od największej liczby graczy, z wykresem z 24 h,
+  odsetkiem pozytywnych recenzji z 30 dni i wiekiem ostatniego oficjalnego newsa;
+- strona gry: metadane, wykres graczy, newsy na tej samej osi czasu, recenzje
+  pozytywne i negatywne oraz lista newsów z treścią.
+
+Dane czyta DuckDB wprost z plików w `data/raw/` i odświeża je, gdy pliki się
+zmienią. Okładki i biblioteka wykresów ECharts ładują się z internetu.
+Metadane nie mają timera: po dodaniu gry uruchom `uv run gamepulse meta`.
 
 ## Lista gier
 
@@ -38,6 +53,7 @@ niezależnie od tego i jako jedyne znajdzie wpis dodany ze starą datą.
 | `data/raw/ccu/RRRR-MM-DD.jsonl` | `ts, appid, player_count, ok, error`; jedna linia na grę i pomiar |
 | `data/raw/news/<appid>.jsonl` | surowy wpis Steam plus `fetched_at`; kolektor nie zapisuje drugi raz tego samego `gid` |
 | `data/raw/review_histogram/<appid>.jsonl` | `fetched_at, appid, results`; pełna migawka na każde pobranie |
+| `data/raw/appdetails/<appid>.jsonl` | `fetched_at, appid, details`; wybrane pola ze sklepu Steam |
 | `data/raw/fivem/RRRR-MM-DD.jsonl` | `ts, url, counts, ok, error`; jedna linia na źródło i pomiar |
 
 - Czasy są w UTC. Pliki są tylko dopisywane.

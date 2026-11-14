@@ -28,6 +28,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("reviews", parents=[steam], help="Steam review histogram snapshot")
     sub.add_parser("meta", parents=[steam], help="Steam store metadata snapshot")
+    web = sub.add_parser("web", parents=[steam], help="local web interface")
+    web.add_argument("--host", default="127.0.0.1", help="address to listen on")
+    web.add_argument("--port", type=int, default=8765)
     sub.add_parser("fivem", parents=[data], help="FiveM total player counts (not from Steam)")
     return parser
 
@@ -56,6 +59,14 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError, KeyError, TypeError) as exc:
             print(f"gamepulse: cannot load games from {args.games}: {exc}", file=sys.stderr)
             return 1
+    if args.command == "web":
+        # Imported here so the collectors do not load the web stack.
+        import uvicorn
+
+        from gamepulse.web.app import create_app
+
+        uvicorn.run(create_app(args.data_dir, games), host=args.host, port=args.port, log_level="warning")
+        return 0
     # Two runs of the same collector would store the same news twice.
     lock = _acquire_lock(args.data_dir, args.command)
     if lock is None:
