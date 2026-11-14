@@ -6,6 +6,7 @@ re-parsing everything on each request.
 """
 
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -39,6 +40,31 @@ def _bucket_for(span_ms: int) -> int | None:
     if span_ms <= 45 * DAY:
         return HOUR
     return DAY
+
+
+def _month_start(ms: int) -> int:
+    moment = datetime.fromtimestamp(ms / 1000, UTC)
+    return int(datetime(moment.year, moment.month, 1, tzinfo=UTC).timestamp() * 1000)
+
+
+def _group_markers(items: list[dict], bucket) -> list[dict]:
+    """One marker per bucket (a day or a month), most important item first."""
+    groups: dict[int, list[dict]] = {}
+    for item in items:
+        groups.setdefault(bucket(item["date_ms"]), []).append(item)
+    markers = []
+    for start, group in sorted(groups.items()):
+        group.sort(key=lambda n: (-n["priority"], -n["date_ms"]))
+        markers.append(
+            {
+                "day_ms": start,
+                "at_ms": group[0]["date_ms"],
+                "count": len(group),
+                "priority": group[0]["priority"],
+                "items": group[:8],
+            }
+        )
+    return markers
 
 
 def _pct(up: int, down: int) -> float | None:
@@ -320,22 +346,24 @@ class Store:
                     [appid, since, now_ms],
                 )
             ]
-            # One marker per day, however many items that day has.
-            days: dict[int, list[dict]] = {}
-            for item in in_range:
-                days.setdefault(item["date_ms"] - item["date_ms"] % DAY, []).append(item)
-            markers = []
-            for day, items in sorted(days.items()):
-                items.sort(key=lambda n: (-n["priority"], -n["date_ms"]))
-                markers.append(
-                    {
-                        "day_ms": day,
-                        "at_ms": items[0]["date_ms"],
-                        "count": len(items),
-                        "priority": items[0]["priority"],
-                        "items": items[:8],
-                    }
+            markers = _group_markers(in_range, lambda ms: ms - ms % DAY)
+
+            # Markers for the review charts: only launches over the whole
+            # history (per month), anything notable over the last 30 days (per day).
+            everything = [
+                self._news_dict(*row)
+                for row in self._rows(
+                    f"SELECT {columns} FROM news WHERE appid = ? AND feed_type = 1 ORDER BY date_ms",
+                    [appid],
                 )
+            ]
+            review_markers = {
+                "monthly": _group_markers([n for n in everything if n["priority"] >= 3], _month_start),
+                "daily": _group_markers(
+                    [n for n in everything if n["priority"] >= 2 and n["date_ms"] >= now_ms - 31 * DAY],
+                    lambda ms: ms - ms % DAY,
+                ),
+            }
 
             recent = [
                 self._news_dict(*row)
@@ -369,6 +397,7 @@ class Store:
                 "ccu_first_ts": first_ccu,
                 "peak_24h": peak_24h,
                 "markers": markers,
+                "review_markers": review_markers,
                 "highlights": highlights,
                 "news_totals": {"official": totals.get(True, 0), "external": totals.get(False, 0)},
                 "reviews": {

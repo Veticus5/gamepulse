@@ -240,7 +240,7 @@ async function openNews(appid, gid, back) {
     const item = await api(`/api/games/${appid}/news/${encodeURIComponent(gid)}`);
     const link = safeUrl(item.url);
     openDrawer(
-      back ? el("button", { class: "link", onclick: back }, "← Wydarzenia z tego dnia") : null,
+      back ? el("button", { class: "link", onclick: back }, "← Wróć do listy wydarzeń") : null,
       el("h3", {}, item.title || "(bez tytułu)"),
       el("div", { class: "meta" },
         `${dateTimeFmt.format(item.date_ms)} · ${item.official ? CATEGORY[item.category] : "zewnętrzny"} · ${item.feedlabel || ""}`,
@@ -252,15 +252,15 @@ async function openNews(appid, gid, back) {
   }
 }
 
-function openDay(appid, marker) {
-  const reopen = () => openDay(appid, marker);
+function openDay(appid, marker, period) {
+  const reopen = () => openDay(appid, marker, period);
   openDrawer(
-    el("h3", {}, `Wydarzenia z ${dateFmt.format(marker.at_ms)}`),
+    el("h3", {}, `Wydarzenia: ${period || dateFmt.format(marker.at_ms)}`),
     el("div", { class: "meta" }, marker.count === 1 ? "1 oficjalny news" : `${marker.count} oficjalnych newsów`),
     el("ul", { class: "events" }, marker.items.map((item) =>
       el("li", {}, el("button", { onclick: () => openNews(appid, item.gid, reopen) },
         el("span", { class: "title" }, item.title || "(bez tytułu)"),
-        el("span", { class: "sub" }, badge(item), timeFmt.format(item.date_ms)))))),
+        el("span", { class: "sub" }, badge(item), period ? dateFmt.format(item.date_ms) : timeFmt.format(item.date_ms)))))),
     marker.count > marker.items.length
       ? el("p", { class: "muted" }, `Pokazano ${marker.items.length} najważniejszych z ${marker.count}.`) : null,
   );
@@ -314,7 +314,7 @@ function withGaps(points, bucketMs) {
   return out;
 }
 
-function drawPlayers(container, data, appid, showMarkers) {
+function drawPlayers(container, data, appid, showMarkers, fromZero) {
   const instance = echarts.init(container);
   const { from, to } = data.range;
   const span = to - from;
@@ -360,7 +360,7 @@ function drawPlayers(container, data, appid, showMarkers) {
     animation: false,
     grid: { left: 70, right: 24, top: 16, bottom: 34 },
     xAxis: baseAxis({ min: from, max: to, axisLabel: { color: COLORS.muted, hideOverlap: true, formatter: label } }),
-    yAxis: [valueAxis({ scale: true }), { type: "value", min: 0, max: 1, show: false }],
+    yAxis: [valueAxis(fromZero ? { min: 0 } : { scale: true }), { type: "value", min: 0, max: 1, show: false }],
     dataZoom: [{ type: "inside", filterMode: "none" }],
     tooltip: {
       ...TOOLTIP,
@@ -395,36 +395,90 @@ function drawPlayers(container, data, appid, showMarkers) {
   return instance;
 }
 
-function drawReviews(container, points, granularity) {
+const MIN_REVIEWS = 10;
+
+function drawReviews(container, points, granularity, mode, markers, appid) {
   const instance = echarts.init(container);
   const label = granularity === "day" ? dayMonthFmt : monthYearFmt;
+  const byTime = new Map(points.map(([t, u, d]) => [t, [u, d]]));
+  // Vertical lines at events; a dot on top makes them clickable.
+  const lines = markers.map((m) => ({ xAxis: granularity === "day" ? m.day_ms : m.day_ms }));
+  const dots = markers.map((m) => ({ value: [m.day_ms, 1], marker: m }));
+  const series = mode === "pct"
+    ? [{
+        name: "Pozytywne %",
+        type: "line",
+        // Too few reviews make the percentage meaningless, so those periods are left out.
+        data: points.map(([t, u, d]) => [t, u + d >= MIN_REVIEWS ? Math.round((1000 * u) / (u + d)) / 10 : null]),
+        connectNulls: false,
+        showSymbol: granularity === "day",
+        symbolSize: 5,
+        lineStyle: { color: COLORS.up, width: 2 },
+        itemStyle: { color: COLORS.up },
+      }]
+    : [
+        { name: "Pozytywne", type: "bar", stack: "r", data: points.map(([t, u]) => [t, u]), barMaxWidth: 18, itemStyle: { color: COLORS.up } },
+        { name: "Negatywne", type: "bar", stack: "r", data: points.map(([t, , d]) => [t, -d]), barMaxWidth: 18, itemStyle: { color: COLORS.down } },
+      ];
+  series[0].markLine = {
+    silent: true,
+    symbol: "none",
+    label: { show: false },
+    lineStyle: { color: COLORS.event, type: "dashed", width: 1, opacity: 0.55 },
+    data: lines,
+  };
+  series.push({
+    name: "Wydarzenia",
+    type: "scatter",
+    yAxisIndex: 1,
+    data: dots,
+    symbolSize: 10,
+    itemStyle: { color: COLORS.event, borderColor: "#0f1216", borderWidth: 2 },
+    cursor: "pointer",
+    z: 5,
+    tooltip: {
+      trigger: "item",
+      formatter: (p) => tipBox(label.format(p.data.marker.day_ms),
+        ...p.data.marker.items.slice(0, 3).map((i) => `• ${i.title || "(bez tytułu)"}`),
+        p.data.marker.count > 3 ? `i ${p.data.marker.count - 3} więcej` : "Kliknij, żeby przeczytać"),
+    },
+  });
+
   instance.setOption({
     backgroundColor: "transparent",
     textStyle: { color: COLORS.text, fontFamily: "system-ui, sans-serif" },
     animation: false,
-    grid: { left: 70, right: 24, top: 16, bottom: 34 },
+    grid: { left: 70, right: 24, top: 22, bottom: 34 },
     xAxis: baseAxis({ axisLabel: { color: COLORS.muted, hideOverlap: true, formatter: (v) => label.format(v) } }),
-    yAxis: valueAxis(),
+    yAxis: [
+      mode === "pct"
+        ? valueAxis({ min: 0, max: 100, axisLabel: { color: COLORS.muted, formatter: "{value}%" } })
+        : valueAxis(),
+      { type: "value", min: 0, max: 1, show: false },
+    ],
     dataZoom: [{ type: "inside", filterMode: "none" }],
     tooltip: {
       ...TOOLTIP,
       trigger: "axis",
-      axisPointer: { type: "shadow" },
+      axisPointer: { type: mode === "pct" ? "line" : "shadow" },
       formatter(params) {
-        const items = Array.isArray(params) ? params : [params];
-        if (!items.length) return "";
-        const up = (items.find((p) => p.seriesName === "Pozytywne") || { value: [0, 0] }).value[1];
-        const down = -(items.find((p) => p.seriesName === "Negatywne") || { value: [0, 0] }).value[1];
-        return tipBox(label.format(items[0].value[0]),
+        const item = (Array.isArray(params) ? params : [params]).find((p) => p.seriesName !== "Wydarzenia");
+        if (!item) return "";
+        const [up, down] = byTime.get(item.value[0]) || [0, 0];
+        const total = up + down;
+        return tipBox(label.format(item.value[0]),
           `Pozytywne: ${nf.format(up)}`, `Negatywne: ${nf.format(down)}`,
-          up + down ? `Odsetek pozytywnych: ${Math.round((100 * up) / (up + down))}%` : "Brak recenzji");
+          total >= MIN_REVIEWS ? `Odsetek pozytywnych: ${Math.round((100 * up) / total)}%`
+            : total ? `Za mało recenzji na wiarygodny odsetek (${total})` : "Brak recenzji");
       },
     },
     graphic: points.length ? [] : [{ type: "text", left: "center", top: "middle", style: { text: "Brak danych o recenzjach", fill: COLORS.muted, fontSize: 14 } }],
-    series: [
-      { name: "Pozytywne", type: "bar", stack: "r", data: points.map(([t, u]) => [t, u]), barMaxWidth: 18, itemStyle: { color: COLORS.up } },
-      { name: "Negatywne", type: "bar", stack: "r", data: points.map(([t, , d]) => [t, -d]), barMaxWidth: 18, itemStyle: { color: COLORS.down } },
-    ],
+    series,
+  });
+  instance.on("click", (params) => {
+    if (params.data && params.data.marker) {
+      openDay(appid, params.data.marker, granularity === "day" ? null : monthYearFmt.format(params.data.marker.day_ms));
+    }
   });
   return instance;
 }
@@ -513,12 +567,25 @@ async function renderGame(appid, rangeKey, token) {
   // --- players chart
   const playersBox = el("div", { class: "chart players" });
   let showMarkers = true;
+  let fromZero = false;
+  const redrawPlayers = () => {
+    charts[0].dispose();
+    charts[0] = drawPlayers(playersBox, data, appid, showMarkers, fromZero);
+  };
   const markerToggle = el("button", { class: "chip active", onclick: () => {
     showMarkers = !showMarkers;
     markerToggle.classList.toggle("active", showMarkers);
-    charts[0].dispose();
-    charts[0] = drawPlayers(playersBox, data, appid, showMarkers);
+    redrawPlayers();
   } }, "Znaczniki wydarzeń");
+  const scaleToggle = el("button", { class: "chip", title: "Dopasowana skala uwypukla drobne ruchy; skala od zera pokazuje je w proporcji", onclick: () => {
+    fromZero = !fromZero;
+    scaleToggle.classList.toggle("active", fromZero);
+    redrawPlayers();
+  } }, "Skala od zera");
+  const firstPoint = data.ccu[0];
+  const lastPoint = data.ccu[data.ccu.length - 1];
+  const rangeChange = data.ccu.length >= 2 && firstPoint[1]
+    ? Math.round((1000 * (lastPoint[1] - firstPoint[1])) / firstPoint[1]) / 10 : null;
   const collected = data.ccu_first_ts
     ? `Pomiary co 5 minut od ${dateTimeFmt.format(data.ccu_first_ts)}. Steam nie udostępnia wcześniejszej historii. Przerwa w linii oznacza, że kolektor nie działał.`
     : "Dla tej gry nie ma jeszcze żadnego pomiaru.";
@@ -526,12 +593,25 @@ async function renderGame(appid, rangeKey, token) {
   // --- reviews chart
   const reviewsBox = el("div", { class: "chart reviews" });
   let granularity = "month";
+  let reviewMode = "count";
+  // When rules mark most months as a "launch", the lines say nothing; start with them off.
+  const crowded = data.review_markers.monthly.length > data.reviews.monthly.length / 3;
+  let reviewMarkers = !crowded;
   const reviewChips = el("div", { class: "chips" });
   function paintReviews() {
-    reviewChips.replaceChildren(...[["month", "Cała historia, miesięcznie"], ["day", "Ostatnie 30 dni, dziennie"]].map(([key, label]) =>
-      el("button", { class: `chip ${granularity === key ? "active" : ""}`, onclick: () => { granularity = key; paintReviews(); } }, label)));
+    const chip = (active, label, onclick) => el("button", { class: `chip ${active ? "active" : ""}`, onclick }, label);
+    reviewChips.replaceChildren(
+      chip(reviewMarkers, "Znaczniki wydarzeń", () => { reviewMarkers = !reviewMarkers; paintReviews(); }),
+      el("span", { class: "sep" }),
+      chip(reviewMode === "count", "Liczba", () => { reviewMode = "count"; paintReviews(); }),
+      chip(reviewMode === "pct", "% pozytywnych", () => { reviewMode = "pct"; paintReviews(); }),
+      el("span", { class: "sep" }),
+      chip(granularity === "month", "Cała historia", () => { granularity = "month"; paintReviews(); }),
+      chip(granularity === "day", "Ostatnie 30 dni", () => { granularity = "day"; paintReviews(); }));
     if (charts[1]) charts[1].dispose();
-    charts[1] = drawReviews(reviewsBox, granularity === "day" ? data.reviews.daily : data.reviews.monthly, granularity);
+    const daily = granularity === "day";
+    charts[1] = drawReviews(reviewsBox, daily ? data.reviews.daily : data.reviews.monthly, granularity, reviewMode,
+      reviewMarkers ? (daily ? data.review_markers.daily : data.review_markers.monthly) : [], appid);
   }
 
   // --- events
@@ -566,7 +646,9 @@ async function renderGame(appid, rangeKey, token) {
     el("div", { class: "panel" },
       el("div", { class: "panel-head" },
         el("h2", {}, "Aktywność graczy"),
-        el("div", { class: "chips" }, markerToggle, RANGES.map(([key, label]) =>
+        rangeChange === null ? null : el("span", { class: "muted", title: "Ostatni pomiar względem pierwszego w wybranym okresie" },
+          "W tym okresie: ", changeNode(rangeChange) || "bez zmian"),
+        el("div", { class: "chips" }, markerToggle, scaleToggle, el("span", { class: "sep" }), RANGES.map(([key, label]) =>
           el("a", { class: `chip ${key === rangeKey ? "active" : ""}`, href: `#/game/${appid}/${key}` }, label)))),
       playersBox,
       el("div", { class: "chart-note" },
@@ -576,7 +658,7 @@ async function renderGame(appid, rangeKey, token) {
         collected)),
     el("div", { class: "panel why" },
       el("h2", {}, "Dlaczego?"),
-      el("p", {}, "Analiza ruszy, gdy uzbiera się dość historii, żeby odróżnić nietypowy skok od zwykłego rytmu dnia i tygodnia. Wtedy pojawią się tu wyjaśnienia razem z dowodami.")),
+      el("p", {}, "Analiza nietypowych skoków w recenzjach ruszy jako pierwsza, bo recenzje mają historię od premiery. Analiza liczby graczy dołączy, gdy uzbiera się dość pomiarów, żeby odróżnić skok od zwykłego rytmu dnia i tygodnia.")),
     el("div", { class: "panel" },
       el("div", { class: "panel-head" },
         el("h2", {}, "Najważniejsze wydarzenia"),
@@ -592,9 +674,12 @@ async function renderGame(appid, rangeKey, token) {
         el("h2", {}, "Recenzje"),
         el("span", { class: "muted" }, `Cała historia: ${pctText(summary.all.pct)} pozytywnych (${reviewSub(summary.all)})`),
         reviewChips),
-      reviewsBox),
+      reviewsBox,
+      el("div", { class: "chart-note" },
+        crowded ? "Znaczniki są domyślnie wyłączone: obecne reguły oznaczają dla tej gry zbyt wiele miesięcy jako premierę. Poprawi to klasyfikator. " : "",
+        `Linie przerywane to wydarzenia: w całej historii tylko premiery i nowa zawartość, w ostatnich 30 dniach także aktualizacje i zapowiedzi. W widoku procentowym pominięto okresy z mniej niż ${MIN_REVIEWS} recenzjami.`)),
   );
-  charts = [drawPlayers(playersBox, data, appid, showMarkers), null];
+  charts = [drawPlayers(playersBox, data, appid, showMarkers, fromZero), null];
   paintReviews();
 }
 

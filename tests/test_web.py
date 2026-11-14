@@ -150,6 +150,20 @@ def test_game_highlights_prefer_important_recent_official_news(data_dir):
     assert result["news_totals"] == {"official": 12, "external": 1}
 
 
+def test_review_markers_launches_per_month_and_notable_per_day(data_dir):
+    append_jsonl(
+        data_dir / "raw" / "news" / "730.jsonl",
+        [
+            {"gid": "l1", "appid": 730, "title": "Operation A is Now Available", "date": (NOW - 400 * DAY) // 1000, "feed_type": 1},
+            {"gid": "l2", "appid": 730, "title": "Operation B is Now Available", "date": (NOW - 400 * DAY + HOUR) // 1000, "feed_type": 1},
+            {"gid": "f1", "appid": 730, "title": "Fan Art Winners", "date": (NOW - 5 * DAY) // 1000, "feed_type": 1},
+        ],
+    )
+    markers = Store(data_dir, GAMES).game(730, "7d", NOW)["review_markers"]
+    assert [(m["count"], m["priority"]) for m in markers["monthly"]] == [(2, 3)]
+    assert [m["items"][0]["gid"] for m in markers["daily"]] == ["a"]  # the patch; fan art is not notable
+
+
 def test_game_reviews_carry_both_granularities(data_dir):
     reviews = Store(data_dir, GAMES).game(730, "7d", NOW)["reviews"]
     assert reviews["daily"] == [[(NOW - 3 * DAY) // 1000 * 1000, 3, 1]]
