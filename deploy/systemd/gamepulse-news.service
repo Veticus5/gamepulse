@@ -1,0 +1,10 @@
+[Unit]
+Description=GamePulse: new Steam news items
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/gamepulse
+ExecStart=%h/.local/bin/uv run --frozen gamepulse news
+TimeoutStartSec=15min

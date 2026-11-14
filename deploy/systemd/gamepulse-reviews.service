@@ -1,0 +1,10 @@
+[Unit]
+Description=GamePulse: Steam review histogram snapshot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/gamepulse
+ExecStart=%h/.local/bin/uv run --frozen gamepulse reviews
+TimeoutStartSec=15min

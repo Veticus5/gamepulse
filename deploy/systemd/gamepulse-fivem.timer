@@ -1,0 +1,9 @@
+[Unit]
+Description=GamePulse: FiveM total player counts
+
+[Timer]
+OnCalendar=*:0/5
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target
