@@ -95,6 +95,10 @@ def create_app(data_dir: Path, games: list[Game], eval_dir: Path = Path("eval"))
         )
         return {"ok": True}
 
+    @app.post("/api/label/undo")
+    def label_undo() -> dict:
+        return {"undone": evaluate.undo_last_label(eval_dir)}
+
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})

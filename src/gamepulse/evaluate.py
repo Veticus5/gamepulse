@@ -90,6 +90,28 @@ def save_label(
     append_jsonl(eval_dir / LABELS_FILE, [row])
 
 
+def undo_last_label(eval_dir: Path) -> str | None:
+    """Drop the most recently labelled item so it can be labelled again.
+
+    Removes every saved row for that item and returns its id, or None when
+    there is nothing to undo.
+    """
+    path = eval_dir / LABELS_FILE
+    rows = [row for row in read_jsonl(path) if "gid" in row]
+    if not rows:
+        return None
+    gid = rows[-1]["gid"]
+    kept = [row for row in rows if row["gid"] != gid]
+    tmp = path.with_suffix(".tmp")
+    tmp.unlink(missing_ok=True)
+    append_jsonl(tmp, kept)
+    if kept:
+        tmp.replace(path)
+    else:
+        path.unlink()
+    return gid
+
+
 def score_tags(label_tags: dict[str, list[str]], predicted_tags: dict[str, list[str]]) -> dict:
     """How well the model's secondary tags match the labeller's, as sets."""
     pairs = [(set(tags), set(predicted_tags[gid])) for gid, tags in label_tags.items() if gid in predicted_tags]

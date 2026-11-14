@@ -110,3 +110,20 @@ def test_score_tags_compares_sets_and_ignores_labels_without_tags(tmp_path):
     assert label_tags == {"a": ["store_item", "sale"], "b": []}
     result = evaluate.score_tags(label_tags, {"a": ["sale", "community"], "b": [], "old": ["sale"]})
     assert result == {"compared": 2, "identical": 1, "labelled": 2, "found": 1, "missed": 1, "extra": 1}
+
+
+def test_undo_returns_the_last_labelled_item_to_the_queue(data_dir, tmp_path):
+    eval_dir = tmp_path / "eval"
+    evaluate.write_sample(eval_dir, [{"gid": "730-1", "appid": 730}, {"gid": "730-2", "appid": 730}, {"gid": "570-2", "appid": 570}])
+    client = TestClient(create_app(data_dir, GAMES, eval_dir))
+    assert client.post("/api/label/undo").json() == {"undone": None}
+    client.post("/api/label", json={"gid": "730-1", "event_type": "patch"})
+    client.post("/api/label", json={"gid": "730-2", "event_type": "sale", "secondary_types": ["patch"]})
+    assert client.get("/api/label/next").json()["item"]["gid"] == "570-2"
+    assert client.post("/api/label/undo").json() == {"undone": "730-2"}
+    state = client.get("/api/label/next").json()
+    assert state["done"] == 1 and state["item"]["gid"] == "730-2"
+    assert evaluate.load_labels(eval_dir) == {"730-1": "patch"}
+    assert client.post("/api/label/undo").json() == {"undone": "730-1"}
+    assert evaluate.load_labels(eval_dir) == {} and not (eval_dir / evaluate.LABELS_FILE).exists()
+    assert client.post("/api/label/undo").json() == {"undone": None}

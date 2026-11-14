@@ -724,8 +724,21 @@ async function renderLabel(token) {
   if (token !== renderToken) return;
   if (labelKeys) document.removeEventListener("keydown", labelKeys);
   labelKeys = null;
+  const undo = el("button", { class: "link", onclick: async () => {
+    undo.disabled = true;
+    try {
+      const response = await fetch("/api/label/undo", { method: "POST" });
+      if (!response.ok) throw new Error(String(response.status));
+      await renderLabel(renderToken);
+      window.scrollTo(0, 0);
+    } catch (error) {
+      undo.disabled = false;
+      console.error(error);
+    }
+  } }, "← Cofnij poprzednią decyzję");
   const head = el("div", { class: "panel-head" },
     el("h2", {}, "Oznaczanie newsów do pomiaru trafności modelu"),
+    data.done ? undo : null,
     el("span", { class: "muted" }, `${data.done} z ${data.total}`));
   if (!data.total) {
     view.replaceChildren(el("div", { class: "panel" }, head,
