@@ -1,0 +1,9 @@
+[Unit]
+Description=GamePulse: dbt models and review anomaly detection
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/gamepulse
+# The project's own environment, created once with `uv sync`.
+ExecStart=%h/projects/gamepulse/.venv/bin/gamepulse model
+TimeoutStartSec=10min

@@ -143,7 +143,8 @@ Limity zapytań nie zostały sprawdzone w dokumentacji.
 ## Timery systemd (użytkownika)
 
 Pliki są w `deploy/systemd/`: CCU i FiveM co 5 minut, newsy co godzinę,
-recenzje raz dziennie o 12:00. Zakładają repozytorium w `~/projects/gamepulse`.
+recenzje raz dziennie o 12:00,
+analiza anomalii (`gamepulse model`) co 30 minut. Zakładają repozytorium w `~/projects/gamepulse`.
 
 - Usługi uruchamiają `.venv/bin/gamepulse`, czyli kod z bieżącego stanu
   katalogu repozytorium. Przełączenie gałęzi zmienia to, co działa w tle.
@@ -170,7 +171,7 @@ systemctl --user daemon-reload
 ```
 
 ```bash
-systemctl --user enable --now gamepulse-ccu.timer gamepulse-fivem.timer gamepulse-news.timer gamepulse-reviews.timer
+systemctl --user enable --now gamepulse-ccu.timer gamepulse-fivem.timer gamepulse-news.timer gamepulse-reviews.timer gamepulse-model.timer
 ```
 
 Podgląd:
@@ -183,7 +184,7 @@ journalctl --user -u gamepulse-ccu.service -n 20
 Cofnięcie:
 
 ```bash
-systemctl --user disable --now gamepulse-ccu.timer gamepulse-fivem.timer gamepulse-news.timer gamepulse-reviews.timer
+systemctl --user disable --now gamepulse-ccu.timer gamepulse-fivem.timer gamepulse-news.timer gamepulse-reviews.timer gamepulse-model.timer
 rm ~/.config/systemd/user/gamepulse-*
 systemctl --user daemon-reload
 ```

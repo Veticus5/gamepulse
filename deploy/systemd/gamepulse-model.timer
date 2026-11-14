@@ -1,0 +1,11 @@
+[Unit]
+Description=GamePulse: dbt models and review anomaly detection
+
+[Timer]
+# Needs no network: it only reads files the collectors already wrote.
+OnCalendar=*:05/30
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
