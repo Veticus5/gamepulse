@@ -1,0 +1,28 @@
+name: gamepulse
+version: "1.0"
+profile: gamepulse
+model-paths: ["models"]
+
+flags:
+  send_anonymous_usage_stats: false
+
+vars:
+  # Absolute path of data/raw; set by `gamepulse model`.
+  raw_dir: data/raw
+  # How many earlier finished periods a period is compared with.
+  baseline_windows: {day: 14, week: 12, month: 12}
+  # Fewer earlier periods than this: no verdict.
+  min_baseline_periods: 6
+  # A period needs this many reviews before its score is judged.
+  min_reviews: 30
+  # Score anomaly: at least this far from the usual share of positive reviews...
+  min_share_shift: 0.05
+  # ...and this many robust standard deviations away.
+  z_threshold: 3.5
+  # Volume anomaly: this many times the usual number of reviews, and at least this many.
+  volume_ratio: 3.0
+  volume_min_reviews: 100
+
+models:
+  gamepulse:
+    +materialized: table

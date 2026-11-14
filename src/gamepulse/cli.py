@@ -1,4 +1,4 @@
-"""Command line entry point: ``gamepulse <collector>|classify|eval-sample|eval-classifier|web``."""
+"""Command line entry point: ``gamepulse <collector>|classify|model|eval-sample|eval-classifier|web``."""
 
 import argparse
 import fcntl
@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import IO
 
-from gamepulse import classify, evaluate, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
+from gamepulse import classify, evaluate, model, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
 from gamepulse.config import load_games
 from gamepulse.steam import make_client
 
@@ -44,6 +44,7 @@ def _parser() -> argparse.ArgumentParser:
     web.add_argument("--host", default="127.0.0.1", help="address to listen on")
     web.add_argument("--port", type=int, default=8765)
     web.add_argument("--eval-dir", type=Path, default=Path("eval"), help="where the sample and labels live")
+    sub.add_parser("model", parents=[data], help="build the dbt tables and find review anomalies")
     sub.add_parser("fivem", parents=[data], help="FiveM total player counts (not from Steam)")
     return parser
 
@@ -66,6 +67,19 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # one line per request otherwise
     games = []
+    if args.command == "model":
+        lock = _acquire_lock(args.data_dir, "model")
+        if lock is None:
+            logging.warning("model: another run is in progress, skipping this one")
+            return 0
+        with lock:
+            try:
+                count = model.run(args.data_dir)
+            except RuntimeError as exc:
+                print(f"gamepulse: {exc}", file=sys.stderr)
+                return 1
+        print(f"Anomalie w recenzjach: {count} (zapisane w {model.anomalies_path(args.data_dir)})")
+        return 0
     if args.command != "fivem":
         try:
             games = load_games(args.games)

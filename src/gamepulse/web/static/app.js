@@ -415,7 +415,7 @@ function drawPlayers(container, data, appid, showMarkers, fromZero) {
 
 const MIN_REVIEWS = 10;
 
-function drawReviews(container, points, granularity, mode, markers, appid) {
+function drawReviews(container, points, granularity, mode, markers, appid, anomalies = []) {
   const instance = echarts.init(container);
   const label = granularity === "day" ? dayMonthFmt : monthYearFmt;
   const byTime = new Map(points.map(([t, u, d]) => [t, [u, d]]));
@@ -444,6 +444,16 @@ function drawReviews(container, points, granularity, mode, markers, appid) {
     label: { show: false },
     lineStyle: { color: COLORS.event, type: "dashed", width: 1, opacity: 0.55 },
     data: lines,
+  };
+  // Unusual periods as a shaded band centred on the period's point.
+  series[0].markArea = {
+    silent: true,
+    data: anomalies.map((a) => {
+      const half = (a.end_ms - a.start_ms) / 2;
+      const down = a.score ? a.score.kind === "review_score_drop" : false;
+      const color = a.score ? (down ? COLORS.down : COLORS.up) : COLORS.event;
+      return [{ xAxis: a.start_ms - half, itemStyle: { color, opacity: 0.16 } }, { xAxis: a.start_ms + half }];
+    }),
   };
   series.push({
     name: "Wydarzenia",
@@ -554,6 +564,52 @@ function newsArchive(appid, totals) {
     el("div", { class: "more" }, more));
 }
 
+const GRAIN_LABEL = { day: "dzień", week: "tydzień", month: "miesiąc" };
+
+function anomalyPeriod(a) {
+  if (a.grain === "month") return monthYearFmt.format(a.start_ms);
+  if (a.grain === "week") return `tydzień od ${dateFmt.format(a.start_ms)}`;
+  return dateFmt.format(a.start_ms);
+}
+
+function anomalyRow(a) {
+  const facts = [];
+  if (a.score) {
+    const down = a.score.kind === "review_score_drop";
+    facts.push(el("span", { class: down ? "down" : "up" },
+      `${down ? "Spadek" : "Wzrost"} ocen: ${Math.round(100 * a.score.value)}% pozytywnych, zwykle ${Math.round(100 * a.score.baseline)}%`));
+  }
+  if (a.volume) {
+    facts.push(el("span", {},
+      `Skok liczby recenzji: ${nf.format(a.volume.value)}, zwykle ${nf.format(Math.round(a.volume.baseline))} (${nf.format(a.volume.ratio)}×)`));
+  }
+  return el("li", {},
+    el("span", { class: "date" }, anomalyPeriod(a)),
+    el("span", { class: "facts" }, facts),
+    el("span", { class: "muted small" }, `${nf.format(a.reviews)} recenzji · ${GRAIN_LABEL[a.grain]}`));
+}
+
+// Unusual review periods found by code. The explanation is the agent's job and is not there yet.
+function anomalyPanel(anomalies) {
+  const SHOWN = 6;
+  const list = el("ul", { class: "anomaly-list" });
+  let all = false;
+  const more = el("button", { class: "chip", onclick: () => { all = !all; paint(); } });
+  function paint() {
+    list.replaceChildren(...(all ? anomalies : anomalies.slice(0, SHOWN)).map(anomalyRow));
+    more.textContent = all ? "Pokaż najnowsze" : `Pokaż wszystkie (${anomalies.length})`;
+  }
+  paint();
+  return el("div", { class: "panel" },
+    el("div", { class: "panel-head" },
+      el("h2", {}, "Nietypowe okresy w recenzjach"),
+      el("span", { class: "muted" }, anomalies.length ? `wykryto ${anomalies.length}, od najnowszych` : ""),
+      anomalies.length > SHOWN ? more : null),
+    anomalies.length ? list : el("p", { class: "muted" }, "Nie wykryto nietypowych okresów albo analiza jeszcze nie była uruchomiona."),
+    el("div", { class: "chart-note" },
+      "Okres trafia tu, gdy odsetek pozytywnych recenzji wyraźnie odbiega od tego, co było zwykłe dla tej gry w poprzedzających okresach, albo gdy recenzji jest co najmniej trzy razy więcej niż zwykle. To wynik obliczeń, bez udziału modelu. Wyjaśnienia przyczyn doda agent w następnym kroku."));
+}
+
 async function renderGame(appid, rangeKey, token) {
   const [data, overview] = await Promise.all([
     api(`/api/games/${appid}?range=${rangeKey}`),
@@ -630,7 +686,8 @@ async function renderGame(appid, rangeKey, token) {
     if (charts[1]) charts[1].dispose();
     const daily = granularity === "day";
     charts[1] = drawReviews(reviewsBox, daily ? data.reviews.daily : data.reviews.monthly, granularity, reviewMode,
-      reviewMarkers ? (daily ? data.review_markers.daily : data.review_markers.monthly) : [], appid);
+      reviewMarkers ? (daily ? data.review_markers.daily : data.review_markers.monthly) : [], appid,
+      data.anomalies.filter((a) => (a.grain === "day") === daily));
   }
 
   // --- events
@@ -675,9 +732,7 @@ async function renderGame(appid, rangeKey, token) {
           el("span", {}, el("i", { style: `background:${COLORS.event}` }), "dzień z ważnym wydarzeniem"),
           el("span", {}, el("i", { style: `background:${COLORS.muted}` }), "dzień z innymi newsami")),
         collected)),
-    el("div", { class: "panel why" },
-      el("h2", {}, "Dlaczego?"),
-      el("p", {}, "Analiza nietypowych skoków w recenzjach ruszy jako pierwsza, bo recenzje mają historię od premiery. Analiza liczby graczy dołączy, gdy uzbiera się dość pomiarów, żeby odróżnić skok od zwykłego rytmu dnia i tygodnia.")),
+    anomalyPanel(data.anomalies),
     el("div", { class: "panel" },
       el("div", { class: "panel-head" },
         el("h2", {}, "Najważniejsze wydarzenia"),

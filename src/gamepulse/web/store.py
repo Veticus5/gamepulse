@@ -14,6 +14,7 @@ import duckdb
 from gamepulse.config import Game
 from gamepulse.storage import read_jsonl
 from gamepulse.classify import priority_of
+from gamepulse.model import anomalies_path
 from gamepulse.web.events import classify as rule_category
 
 MINUTE = 60_000
@@ -84,6 +85,7 @@ class Store:
         self._reviews: dict[int, dict] = {}
         self._meta: dict[int, dict] = {}
         self._events: dict[str, dict] = {}
+        self._anomalies: dict[int, list[dict]] = {}
 
     # ------------------------------------------------------------ loading
 
@@ -158,9 +160,40 @@ class Store:
         if self._changed("events", files):
             # Later lines win, so a re-classification replaces the earlier label.
             self._events = {row.get("gid"): row for path in files for row in read_jsonl(path)}
+        path = anomalies_path(self.data_dir)
+        if self._changed("anomalies", [path] if path.exists() else []):
+            self._anomalies = self._load_anomalies(path) if path.exists() else {}
         files = self._files("appdetails")
         if self._changed("meta", files):
             self._meta = self._latest_snapshots(files, "details")
+
+    def _load_anomalies(self, path: Path) -> dict[int, list[dict]]:
+        """Anomalies per game, newest first; a score and a volume anomaly of
+        the same period are shown together as one unusual period."""
+        rows = self._con.execute(
+            """
+            SELECT anomaly_id, appid, grain, epoch_ms(period_start::TIMESTAMP), epoch_ms(period_end::TIMESTAMP),
+                   kind, value::DOUBLE, baseline::DOUBLE, deviation::DOUBLE, reviews::BIGINT
+            FROM read_parquet(?)
+            ORDER BY period_start DESC, grain
+            """,
+            [str(path)],
+        ).fetchall()
+        periods: dict[tuple, dict] = {}
+        for anomaly_id, appid, grain, start_ms, end_ms, kind, value, baseline, deviation, reviews in rows:
+            period = periods.setdefault(
+                (appid, grain, start_ms),
+                {"appid": appid, "grain": grain, "start_ms": start_ms, "end_ms": end_ms,
+                 "reviews": reviews, "score": None, "volume": None},
+            )
+            if kind == "review_volume_spike":
+                period["volume"] = {"id": anomaly_id, "value": int(value), "baseline": baseline, "ratio": round(deviation, 2)}
+            else:
+                period["score"] = {"id": anomaly_id, "kind": kind, "value": round(value, 4), "baseline": round(baseline, 4)}
+        by_game: dict[int, list[dict]] = {}
+        for period in periods.values():
+            by_game.setdefault(period.pop("appid"), []).append(period)
+        return by_game
 
     @staticmethod
     def _latest_snapshots(files: list[Path], key: str) -> dict[int, dict]:
@@ -422,6 +455,7 @@ class Store:
                     "monthly": review_points(results.get("rollups")),
                 },
                 "review_summary": self._review_summary(appid),
+                "anomalies": self._anomalies.get(appid, []),
             }
 
     def news_list(self, appid: int, kind: str, query: str, offset: int, limit: int) -> dict | None:

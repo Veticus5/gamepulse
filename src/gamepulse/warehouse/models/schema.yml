@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: review_periods
+    description: Review counts per game and period (day, week or month).
+  - name: review_baselines
+    description: Finished periods with the median of the periods before them.
+  - name: anomalies
+    description: Periods whose review score or volume is clearly unusual for the game.
+    columns:
+      - name: anomaly_id
+        tests: [unique, not_null]
+      - name: kind
+        tests:
+          - accepted_values:
+              values: [review_score_drop, review_score_rise, review_volume_spike]

@@ -14,6 +14,7 @@ uv run gamepulse news --full    # cała historia newsów
 uv run gamepulse reviews        # histogram recenzji (Steam)
 uv run gamepulse fivem          # łączna liczba graczy FiveM (poza Steamem)
 uv run gamepulse meta           # metadane gier ze sklepu Steam (studio, premiera, gatunki)
+uv run gamepulse model          # modele dbt i wykrywanie anomalii w recenzjach
 uv run gamepulse web            # interfejs pod http://127.0.0.1:8765
 uv run pytest -q                # testy, bez sieci
 ```
@@ -68,6 +69,34 @@ rzeczy), datę wejścia w życie, jednozdaniowe streszczenie, ważność i pewno
    precyzja i czułość per typ, zgodność tagów dodatkowych oraz lista rozbieżności. Uruchamiaj po każdej
    zmianie promptu lub modelu.
 
+## Anomalie w recenzjach
+
+`uv run gamepulse model` uruchamia modele dbt (`src/gamepulse/warehouse/`) na
+DuckDB i zapisuje tabelę `anomalies`. Trwa kilka sekund. Liczy wyłącznie kod,
+model językowy nie bierze w tym udziału.
+
+| Model dbt | Zawartość |
+|---|---|
+| `stg_review_snapshots` | jedna linia na migawkę histogramu recenzji |
+| `review_periods` | recenzje na grę i okres: miesiąc lub tydzień dla całej historii (jak podaje Steam), dzień dla ostatnich 30 dni i dalej |
+| `review_baselines` | zakończony okres obok mediany z poprzedzających okresów (12 miesięcy, 12 tygodni, 14 dni) |
+| `anomalies` | okresy wyraźnie odbiegające od tego, co zwykłe dla danej gry |
+
+Rodzaje anomalii (`kind`):
+
+- `review_score_drop`, `review_score_rise`: odsetek pozytywnych odbiega od mediany
+  o co najmniej 5 punktów procentowych i o co najmniej 3,5 odchylenia
+  (odporne odchylenie z historii gry albo losowy rozrzut przy tej liczbie
+  recenzji, większe z nich); okres ma co najmniej 30 recenzji.
+- `review_volume_spike`: co najmniej 3 razy więcej recenzji niż zwykle i co najmniej 100.
+
+Progi są w `src/gamepulse/warehouse/dbt_project.yml` (`vars`). Ograniczenia:
+
+- Okres bez co najmniej 6 wcześniejszych zakończonych okresów nie jest oceniany,
+  więc pierwsze miesiące gry po premierze nie dają anomalii.
+- Trwający miesiąc, tydzień i dzień są pomijane, bo mają niepełne liczby.
+- Dłuższy epizod daje osobną anomalię dla każdego okresu.
+
 ## Lista gier
 
 `games.toml`. Dla nowej gry zwykłe `news` samo pobierze całą historię, bo jej
@@ -88,6 +117,9 @@ niezależnie od tego i jako jedyne znajdzie wpis dodany ze starą datą.
 | `data/raw/review_histogram/<appid>.jsonl` | `fetched_at, appid, results`; pełna migawka na każde pobranie |
 | `data/raw/appdetails/<appid>.jsonl` | `fetched_at, appid, details`; wybrane pola ze sklepu Steam |
 | `data/raw/fivem/RRRR-MM-DD.jsonl` | `ts, url, counts, ok, error`; jedna linia na źródło i pomiar |
+
+| `data/derived/anomalies.parquet` | tabela `anomalies`; czyta ją interfejs, a później agent |
+| `data/warehouse/gamepulse.duckdb` | baza dbt z wszystkimi modelami; do własnych zapytań, gdy `gamepulse model` nie działa |
 
 - Czasy są w UTC. Pliki są tylko dopisywane.
 - W plikach CCU i FiveM linia z `ok: false` oznacza, że kolektor działał, ale

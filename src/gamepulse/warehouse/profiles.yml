@@ -1,0 +1,7 @@
+gamepulse:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: "{{ env_var('GAMEPULSE_DUCKDB') }}"
+      threads: 1

@@ -161,7 +161,12 @@ a.tile:hover { border-color: var(--accent); transform: translateY(-2px); }
 .news-list .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .news-list .summary { display: block; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
 
-.why { border-style: dashed; color: var(--muted); }
+.anomaly-list { list-style: none; margin: 0; padding: 0; }
+.anomaly-list li { display: grid; grid-template-columns: 170px 1fr auto; gap: 12px; align-items: baseline; padding: 8px 4px; border-top: 1px solid var(--line); }
+.anomaly-list li:first-child { border-top: 0; }
+.anomaly-list .date { color: var(--muted); font-size: 13px; }
+.anomaly-list .facts { display: flex; flex-direction: column; gap: 2px; }
+@media (max-width: 700px) { .anomaly-list li { grid-template-columns: 1fr; gap: 2px; } }
 
 /* ---------- drawer */
 

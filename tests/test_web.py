@@ -241,3 +241,45 @@ def test_model_labels_replace_rules_and_move_markers_to_the_effective_date(data_
     # Published two days ago, but takes effect within the last 24 hours.
     assert [m["items"][0]["gid"] for m in result["markers"]] == ["a"]
     assert result["news_totals"]["classified"] == 1
+
+
+def write_anomalies(data_dir, rows):
+    import duckdb
+
+    out = data_dir / "derived" / "anomalies.parquet"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    values = ", ".join(
+        f"('{r['id']}', {r['appid']}, '{r['grain']}', DATE '{r['start']}', DATE '{r['end']}', '{r['kind']}', "
+        f"{r['value']}, {r['baseline']}, {r['deviation']}, {r['score']}, {r['reviews']})"
+        for r in rows
+    )
+    duckdb.sql(
+        f"COPY (SELECT * FROM (VALUES {values}) t(anomaly_id, appid, grain, period_start, period_end, kind, "
+        f"value, baseline, deviation, score, reviews)) TO '{out}' (FORMAT parquet)"
+    )
+
+
+def test_game_lists_anomalies_grouped_by_period_newest_first(data_dir):
+    base = {"appid": 730, "grain": "month", "value": 0.3, "baseline": 0.9, "deviation": -0.6, "score": -18.2, "reviews": 5625}
+    write_anomalies(data_dir, [
+        {**base, "id": "a1", "start": "2022-08-01", "end": "2022-09-01", "kind": "review_score_drop"},
+        {**base, "id": "a2", "start": "2022-08-01", "end": "2022-09-01", "kind": "review_volume_spike",
+         "value": 5625, "baseline": 1347.5, "deviation": 4.17, "score": 4.1},
+        {**base, "id": "a3", "start": "2026-11-03", "end": "2026-11-04", "kind": "review_score_rise", "grain": "day",
+         "value": 0.95, "deviation": 0.05, "score": 4.0, "reviews": 400},
+        {**base, "id": "other", "appid": 570, "start": "2020-01-01", "end": "2020-02-01", "kind": "review_score_drop"},
+    ])
+    store = Store(data_dir, GAMES)
+    found = store.game(730, "30d", NOW)["anomalies"]
+    assert [(a["grain"], a["start_ms"]) for a in found] == [("day", 1793664000000), ("month", 1659312000000)]
+    month = found[1]
+    assert month["end_ms"] == 1661990400000
+    assert month["reviews"] == 5625
+    assert month["score"] == {"id": "a1", "kind": "review_score_drop", "value": 0.3, "baseline": 0.9}
+    assert month["volume"] == {"id": "a2", "value": 5625, "baseline": 1347.5, "ratio": 4.17}
+    assert found[0]["volume"] is None
+    assert store.game(413150, "30d", NOW)["anomalies"] == []
+
+
+def test_game_without_model_run_has_no_anomalies(data_dir):
+    assert Store(data_dir, GAMES).game(730, "30d", NOW)["anomalies"] == []
