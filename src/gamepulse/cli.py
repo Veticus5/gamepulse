@@ -35,6 +35,7 @@ def _parser() -> argparse.ArgumentParser:
     sample = sub.add_parser("eval-sample", parents=[steam], help="draw the news sample to label by hand")
     sample.add_argument("--size", type=int, default=100)
     sample.add_argument("--since-days", type=int, default=365)
+    sample.add_argument("--add", action="store_true", help="append a fresh batch to the existing sample")
     ev = sub.add_parser("eval-classifier", parents=[steam], help="compare the model with hand-made labels")
     ev.add_argument("--model", default=classify.DEFAULT_MODEL, help="Ollama model name")
     for command in (sample, ev):
@@ -80,11 +81,15 @@ def main(argv: list[str] | None = None) -> int:
         uvicorn.run(create_app(args.data_dir, games, args.eval_dir), host=args.host, port=args.port, log_level="warning")
         return 0
     if args.command == "eval-sample":
+        if args.add:
+            picked = evaluate.add_batch(games, args.data_dir, args.eval_dir, size=args.size, since_days=args.since_days)
+            print(f"Dodano nową partię: {len(picked)} newsów do oznaczenia")
+            return 0 if picked else 1
         try:
             picked = evaluate.draw_sample(games, args.data_dir, size=args.size, since_days=args.since_days)
             path = evaluate.write_sample(args.eval_dir, picked)
         except FileExistsError as exc:
-            print(f"gamepulse: {exc}", file=sys.stderr)
+            print(f"gamepulse: {exc} (użyj --add, żeby dodać nową partię)", file=sys.stderr)
             return 1
         print(f"{len(picked)} newsów zapisanych w {path}")
         return 0 if picked else 1

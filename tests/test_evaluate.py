@@ -127,3 +127,30 @@ def test_undo_returns_the_last_labelled_item_to_the_queue(data_dir, tmp_path):
     assert client.post("/api/label/undo").json() == {"undone": "730-1"}
     assert evaluate.load_labels(eval_dir) == {} and not (eval_dir / evaluate.LABELS_FILE).exists()
     assert client.post("/api/label/undo").json() == {"undone": None}
+
+
+def test_add_batch_appends_new_items_and_scores_per_batch(data_dir, tmp_path, client_for):
+    import httpx, json
+
+    eval_dir = tmp_path / "eval"
+    evaluate.write_sample(eval_dir, evaluate.draw_sample(GAMES, data_dir, size=5, since_days=365))
+    first = {row["gid"] for row in evaluate.load_sample(eval_dir)}
+    added = evaluate.add_batch(GAMES, data_dir, eval_dir, size=4, since_days=365)
+    sample = evaluate.load_sample(eval_dir)
+    assert len(added) == 4 and not ({row["gid"] for row in added} & first)
+    assert [row["batch"] for row in sample] == [1] * 5 + [2] * 4
+    assert evaluate.add_batch(GAMES, data_dir, eval_dir, size=2, since_days=365)[0]["gid"] not in {r["gid"] for r in sample}
+    assert max(row["batch"] for row in evaluate.load_sample(eval_dir)) == 3
+
+    for row in sample:
+        evaluate.save_label(eval_dir, row["gid"], row["appid"], "patch" if row["batch"] == 1 else "sale", [])
+
+    def handler(request):
+        answer = {"event_type": "patch", "secondary_types": [], "effective_date": None, "summary": "s", "importance": "low", "confidence": 0.5}
+        return httpx.Response(200, json={"message": {"content": json.dumps(answer)}})
+
+    result = evaluate.run(client_for(handler), GAMES, data_dir, eval_dir, model="m")
+    assert result["batches"][1] == {"compared": 5, "correct": 5, "accuracy": 1.0}
+    assert result["batches"][2] == {"compared": 4, "correct": 0, "accuracy": 0.0}
+    assert result["batches"][3]["compared"] == 0
+    assert "partia 1: 5/5" in evaluate.format_report(result, {})

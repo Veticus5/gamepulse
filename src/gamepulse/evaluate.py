@@ -20,12 +20,20 @@ SAMPLE_FILE = "news_sample.jsonl"
 LABELS_FILE = "news_labels.jsonl"
 
 
-def draw_sample(games: list[Game], data_dir: Path, *, size: int, since_days: int, seed: int = 42) -> list[dict]:
+def draw_sample(
+    games: list[Game],
+    data_dir: Path,
+    *,
+    size: int,
+    since_days: int,
+    seed: int = 42,
+    exclude: set | None = None,
+) -> list[dict]:
     """Pick ``size`` official news items, spread evenly across games."""
     cutoff = time.time() - since_days * 86400
     rng = random.Random(seed)
     pools = []
-    seen: set = set()
+    seen: set = set(exclude or ())
     for game in games:
         items = [
             {"gid": item["gid"], "appid": game.appid}
@@ -60,7 +68,24 @@ def write_sample(eval_dir: Path, sample: list[dict]) -> Path:
 
 
 def load_sample(eval_dir: Path) -> list[dict]:
-    return read_jsonl(eval_dir / SAMPLE_FILE)
+    """Sampled items in labelling order; rows without a batch are batch 1."""
+    return [{"batch": 1, **row} for row in read_jsonl(eval_dir / SAMPLE_FILE)]
+
+
+def add_batch(games: list[Game], data_dir: Path, eval_dir: Path, *, size: int, since_days: int) -> list[dict]:
+    """Append a fresh batch of items that are not in the sample yet.
+
+    A prompt tuned on one batch must be judged on another, otherwise the
+    score only shows how well it was fitted to the items it was tuned on.
+    """
+    existing = load_sample(eval_dir)
+    batch = max((row["batch"] for row in existing), default=0) + 1
+    picked = draw_sample(
+        games, data_dir, size=size, since_days=since_days,
+        seed=42 + batch, exclude={row["gid"] for row in existing},
+    )
+    append_jsonl(eval_dir / SAMPLE_FILE, [{**row, "batch": batch} for row in picked])
+    return picked
 
 
 def load_labels(eval_dir: Path) -> dict[str, str | None]:
@@ -182,6 +207,11 @@ def run(client: httpx.Client, games: list[Game], data_dir: Path, eval_dir: Path,
         predicted_tags.update({gid: done[gid].get("secondary_types") or [] for gid in wanted if gid in done})
     result = score(labels, predictions)
     result["tags"] = score_tags(load_label_tags(eval_dir), predicted_tags)
+    batch_of = {row["gid"]: row["batch"] for row in load_sample(eval_dir)}
+    result["batches"] = {}
+    for batch in sorted(set(batch_of.values())):
+        part = score({gid: label for gid, label in labels.items() if batch_of.get(gid) == batch}, predictions)
+        result["batches"][batch] = {key: part[key] for key in ("compared", "correct", "accuracy")}
     return result
 
 
@@ -197,6 +227,12 @@ def format_report(result: dict, titles: dict[str, str]) -> str:
     for event_type, row in result["per_type"].items():
         fmt = lambda v: "—" if v is None else f"{v:.0%}"
         lines.append(f"{event_type:<18}{row['labelled']:>10}{row['predicted']:>8}{fmt(row['precision']):>10}{fmt(row['recall']):>9}")
+    batches = result.get("batches") or {}
+    if len(batches) > 1:
+        lines.insert(1, "  " + "; ".join(
+            f"partia {batch}: {part['correct']}/{part['compared']}" + (f" = {part['accuracy']:.1%}" if part["compared"] else "")
+            for batch, part in batches.items()
+        ))
     tags = result.get("tags")
     if tags and tags["compared"]:
         lines += [
