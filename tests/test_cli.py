@@ -57,3 +57,10 @@ def test_cli_reviews_runs_collector(monkeypatch, args, tmp_path):
     )
     assert cli.main(["reviews", *args]) == 0
     assert (tmp_path / "data" / "raw" / "review_histogram" / "730.jsonl").exists()
+
+
+def test_cli_fivem_needs_no_games_file(monkeypatch, tmp_path):
+    use_handler(monkeypatch, lambda request: httpx.Response(200, json=[1, 2, 3]))
+    data_dir = tmp_path / "data"
+    assert cli.main(["fivem", "--data-dir", str(data_dir)]) == 0
+    assert list((data_dir / "raw" / "fivem").glob("*.jsonl"))

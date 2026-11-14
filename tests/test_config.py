@@ -37,4 +37,6 @@ def test_load_games_rejects_empty_file(tmp_path):
 
 
 def test_repo_games_toml_loads():
-    assert len(load_games(REPO / "games.toml")) == 15
+    games = load_games(REPO / "games.toml")
+    assert games
+    assert all(g.appid > 0 and g.name for g in games)

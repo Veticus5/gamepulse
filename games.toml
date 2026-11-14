@@ -1,4 +1,114 @@
-# Gry śledzone przez kolektory. Identyfikatory sprawdzone w Steamie 14 listopada 2026 r.
+# Gry śledzone przez kolektory Steam. Lista zaakceptowana 14 listopada 2026 r.;
+# identyfikatory sprawdzone tego dnia w Steamie.
+# FiveM nie ma użytecznych danych w Steamie: zbiera go polecenie `gamepulse fivem`.
+
+# --- Wskazane przez użytkownika
+
+[[games]]
+appid = 1546970
+name = "Grand Theft Auto III – The Definitive Edition"
+
+[[games]]
+appid = 1546990
+name = "Grand Theft Auto: Vice City – The Definitive Edition"
+
+[[games]]
+appid = 1547000
+name = "Grand Theft Auto: San Andreas – The Definitive Edition"
+
+[[games]]
+appid = 271590
+name = "Grand Theft Auto V Legacy"
+
+[[games]]
+appid = 3240220
+name = "Grand Theft Auto V Enhanced"
+
+[[games]]
+appid = 1867240
+name = "WARDOGS"
+
+[[games]]
+appid = 238960
+name = "Path of Exile"
+
+[[games]]
+appid = 2694490
+name = "Path of Exile 2"
+
+[[games]]
+appid = 3932890
+name = "Escape from Tarkov"
+
+# --- Regularne sezony i patche
+
+[[games]]
+appid = 252490
+name = "Rust"
+
+[[games]]
+appid = 230410
+name = "Warframe"
+
+[[games]]
+appid = 1172470
+name = "Apex Legends"
+
+[[games]]
+appid = 359550
+name = "Tom Clancy's Rainbow Six Siege"
+
+[[games]]
+appid = 381210
+name = "Dead by Daylight"
+
+[[games]]
+appid = 553850
+name = "HELLDIVERS 2"
+
+[[games]]
+appid = 2767030
+name = "Marvel Rivals"
+
+# --- Strzelanki sieciowe: tło dla WARDOGS i Tarkova
+
+[[games]]
+appid = 1808500
+name = "ARC Raiders"
+
+[[games]]
+appid = 2507950
+name = "Delta Force"
+
+[[games]]
+appid = 2807960
+name = "Battlefield 6"
+
+[[games]]
+appid = 221100
+name = "DayZ"
+
+# --- Świeże premiery
+
+[[games]]
+appid = 2868840
+name = "Slay the Spire 2"
+
+[[games]]
+appid = 4115450
+name = "Phantom Blade Zero"
+
+[[games]]
+appid = 4530370
+name = "Football Manager 27"
+
+# --- Kontekst Rockstara
+
+[[games]]
+appid = 1174180
+name = "Red Dead Redemption 2"
+
+# --- Punkt odniesienia dla całego Steama
 
 [[games]]
 appid = 730
@@ -9,53 +119,5 @@ appid = 570
 name = "Dota 2"
 
 [[games]]
-appid = 578080
-name = "PUBG: BATTLEGROUNDS"
-
-[[games]]
-appid = 1172470
-name = "Apex Legends"
-
-[[games]]
-appid = 553850
-name = "HELLDIVERS 2"
-
-[[games]]
-appid = 1086940
-name = "Baldur's Gate 3"
-
-[[games]]
-appid = 1091500
-name = "Cyberpunk 2077"
-
-[[games]]
-appid = 1245620
-name = "ELDEN RING"
-
-[[games]]
 appid = 413150
 name = "Stardew Valley"
-
-[[games]]
-appid = 2694490
-name = "Path of Exile 2"
-
-[[games]]
-appid = 1623730
-name = "Palworld"
-
-[[games]]
-appid = 252490
-name = "Rust"
-
-[[games]]
-appid = 275850
-name = "No Man's Sky"
-
-[[games]]
-appid = 548430
-name = "Deep Rock Galactic"
-
-[[games]]
-appid = 2379780
-name = "Balatro"

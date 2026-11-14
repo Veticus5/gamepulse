@@ -14,8 +14,11 @@ USER_AGENT = "gamepulse-collector/0.1"
 TIMEOUT_SECONDS = 20.0
 
 
-class SteamError(Exception):
-    """Steam did not return the data we asked for."""
+class FetchError(Exception):
+    """The remote service did not return the data we asked for."""
+
+
+SteamError = FetchError
 
 
 def make_client(transport: httpx.BaseTransport | None = None) -> httpx.Client:
@@ -27,19 +30,24 @@ def make_client(transport: httpx.BaseTransport | None = None) -> httpx.Client:
     )
 
 
-def _get_json(client: httpx.Client, url: str, params: dict[str, Any] | None = None) -> dict:
+def get_json(client: httpx.Client, url: str, params: dict[str, Any] | None = None) -> Any:
+    """GET a URL and decode JSON; every failure becomes a FetchError."""
     try:
         response = client.get(url, params=params)
     except httpx.HTTPError as exc:
-        raise SteamError(f"{type(exc).__name__}: {exc}") from exc
+        raise FetchError(f"{type(exc).__name__}: {exc}") from exc
     if response.status_code != 200:
-        raise SteamError(f"HTTP {response.status_code} from {response.url.path}")
+        raise FetchError(f"HTTP {response.status_code} from {response.url.path}")
     try:
-        body = response.json()
+        return response.json()
     except ValueError as exc:
-        raise SteamError(f"non-JSON response from {response.url.path}") from exc
+        raise FetchError(f"non-JSON response from {response.url.path}") from exc
+
+
+def _get_json(client: httpx.Client, url: str, params: dict[str, Any] | None = None) -> dict:
+    body = get_json(client, url, params)
     if not isinstance(body, dict):
-        raise SteamError(f"unexpected JSON from {response.url.path}")
+        raise SteamError(f"unexpected JSON from {url}")
     return body
 
 
