@@ -26,9 +26,10 @@ RANGES = {"24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY, "all": None}
 HIGHLIGHT_WINDOW = 90 * DAY
 NEWS_KINDS = ("official", "external", "all")
 FIVEM_LIVE_SOURCE = "https://static.cfx.re/runtime/counts.json"
-# A collector run is expected every 5 minutes; anything longer than this
+# A collector run is expected every 30 minutes (every 5 until 2026-11-15);
+# anything longer than this
 # between two runs counts as a gap (the computer was off, or Steam was down).
-GAP_THRESHOLD = 15 * MINUTE
+GAP_THRESHOLD = 45 * MINUTE
 
 
 def _sql_list(files: list[Path]) -> str:

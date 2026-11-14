@@ -142,15 +142,15 @@ Limity zapytań nie zostały sprawdzone w dokumentacji.
 
 ## Timery systemd (użytkownika)
 
-Pliki są w `deploy/systemd/`: CCU i FiveM co 5 minut, newsy co godzinę,
+Pliki są w `deploy/systemd/`: CCU i FiveM co 30 minut, newsy co godzinę,
 recenzje raz dziennie o 12:00,
-analiza anomalii (`gamepulse model`) co 30 minut. Zakładają repozytorium w `~/projects/gamepulse`.
+analiza anomalii (`gamepulse model`) raz dziennie o 12:30. Zakładają repozytorium w `~/projects/gamepulse`.
 
 - Usługi uruchamiają `.venv/bin/gamepulse`, czyli kod z bieżącego stanu
   katalogu repozytorium. Przełączenie gałęzi zmienia to, co działa w tle.
 - Newsy i recenzje nadrabiają pominięte uruchomienie po włączeniu komputera.
   Jeśli sieć jeszcze nie działa, próbują ponownie co 2 minuty, do 4 razy.
-- CCU i FiveM nie ponawiają; kolejny pomiar jest za 5 minut.
+- CCU i FiveM nie ponawiają; kolejny pomiar jest za 30 minut.
 
 Instalacja:
 

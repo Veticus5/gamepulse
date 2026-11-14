@@ -2,8 +2,8 @@
 Description=GamePulse: dbt models and review anomaly detection
 
 [Timer]
-# Needs no network: it only reads files the collectors already wrote.
-OnCalendar=*:05/30
+# Half an hour after the review snapshot, the only input that changes daily.
+OnCalendar=*-*-* 12:30:00
 RandomizedDelaySec=30
 Persistent=true
 

@@ -137,7 +137,7 @@ function renderStatus(status) {
     el("span", { title: dateTimeFmt.format(status.last_ts) },
       el("span", { class: `dot ${fresh ? "ok" : "stale"}` }), `Ostatni pomiar ${ago(status.last_ts)}`),
     el("span", {}, `Pomiary w 24 h: ${nf.format(status.runs_24h)}`),
-    el("span", { class: status.gaps_24h ? "" : "muted", title: "Przerwy dłuższe niż 15 minut między pomiarami" },
+    el("span", { class: status.gaps_24h ? "" : "muted", title: "Przerwy dłuższe niż 45 minut między pomiarami" },
       `Przerwy: ${status.gaps_24h}`),
     el("span", { class: "muted" }, `Zbierane od ${dateTimeFmt.format(status.first_ts)}`),
   );
@@ -323,7 +323,7 @@ function tipBox(header, ...lines) {
 
 /** Break the line wherever two neighbouring points are too far apart. */
 function withGaps(points, bucketMs) {
-  const limit = bucketMs ? bucketMs * 2.5 : 15 * 60000;
+  const limit = bucketMs ? bucketMs * 2.5 : 45 * 60000;
   const out = [];
   points.forEach((point, index) => {
     if (index && point[0] - points[index - 1][0] > limit) out.push([points[index - 1][0] + 1, null]);
@@ -339,7 +339,7 @@ function drawPlayers(container, data, appid, showMarkers, fromZero) {
   const label = (value) => (span <= 2 * 86400000 ? timeFmt.format(value) : dayMonthFmt.format(value));
   const line = withGaps(data.ccu, data.ccu_bucket_ms);
   const values = data.ccu.map((p) => p[1]);
-  const reach = (data.ccu_bucket_ms || 5 * 60000) * 3;
+  const reach = data.ccu_bucket_ms ? data.ccu_bucket_ms * 3 : 45 * 60000;
   // A marker sits on the line when there is a measurement close to it,
   // otherwise at the bottom of the chart.
   const markers = (showMarkers ? data.markers : []).map((marker) => {
@@ -662,7 +662,7 @@ async function renderGame(appid, rangeKey, token) {
   const rangeChange = data.ccu.length >= 2 && firstPoint[1]
     ? Math.round((1000 * (lastPoint[1] - firstPoint[1])) / firstPoint[1]) / 10 : null;
   const collected = data.ccu_first_ts
-    ? `Pomiary co 5 minut od ${dateTimeFmt.format(data.ccu_first_ts)}. Steam nie udostępnia wcześniejszej historii. Przerwa w linii oznacza, że kolektor nie działał.`
+    ? `Pomiary co 30 minut od ${dateTimeFmt.format(data.ccu_first_ts)}. Steam nie udostępnia wcześniejszej historii. Przerwa w linii oznacza, że kolektor nie działał.`
     : "Dla tej gry nie ma jeszcze żadnego pomiaru.";
 
   // --- reviews chart
