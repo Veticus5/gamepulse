@@ -149,6 +149,10 @@ def create_app(data_dir: Path, games: list[Game], eval_dir: Path = Path("eval"))
         rate.save_rating(eval_dir, explanation, rating.rating, rating.note)
         return {"ok": True}
 
+    @app.post("/api/rate/undo")
+    def rate_undo() -> dict:
+        return {"undone": rate.undo_last_rating(eval_dir)}
+
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})

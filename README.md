@@ -207,7 +207,8 @@ Trafności wyjaśnień nikt jeszcze nie zmierzył; nie ma do tego ręcznie oznac
 
 1. Strona `#/rate` („Ocena wyjaśnień") pokazuje po jednym wyjaśnieniu z dowodami
    i porównaniem grup graczy. Oceniasz: trafne, częściowo, błędne, nie umiem ocenić
-   (klawisze 1–4), opcjonalnie z notatką.
+   (klawisze 1–4), opcjonalnie z notatką. „Cofnij poprzednią ocenę" usuwa ostatnią
+   decyzję i pokazuje to wyjaśnienie ponownie.
 2. Oceny trafiają do `eval/explanation_ratings.jsonl`.
 3. `uv run gamepulse eval-explanations` pokazuje oceny w podziale na werdykt agenta.
 

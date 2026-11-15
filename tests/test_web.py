@@ -422,3 +422,6 @@ def test_rating_page_serves_unrated_explanations_and_stores_ratings(data_dir, tm
     after = client.get("/api/rate/next").json()
     assert (after["done"], after["item"]) == (1, None)
     assert after["summary"]["by_verdict"]["likely"]["partly"] == 1
+    assert client.post("/api/rate/undo").json() == {"undone": "e1"}
+    assert client.get("/api/rate/next").json()["item"]["episode"]["id"] == "e1"
+    assert client.post("/api/rate/undo").json() == {"undone": None}

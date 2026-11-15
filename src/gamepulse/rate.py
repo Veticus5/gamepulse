@@ -56,6 +56,28 @@ def save_rating(eval_dir: Path, explanation: dict, rating: str, note: str = "") 
     }])
 
 
+def undo_last_rating(eval_dir: Path) -> str | None:
+    """Drop the most recent rating so that explanation can be rated again.
+
+    Removes every saved rating of that explanation version and returns the
+    episode id, or None when there is nothing to undo.
+    """
+    path = eval_dir / RATINGS_FILE
+    rows = [row for row in read_jsonl(path) if "episode_id" in row]
+    if not rows:
+        return None
+    last = _key(rows[-1])
+    kept = [row for row in rows if _key(row) != last]
+    tmp = path.with_suffix(".tmp")
+    tmp.unlink(missing_ok=True)
+    append_jsonl(tmp, kept)
+    if kept:
+        tmp.replace(path)
+    else:
+        path.unlink()
+    return last[0]
+
+
 def pending(explanations: list[dict], ratings: dict[tuple, dict]) -> list[dict]:
     """Explanations made by the model that have no rating yet."""
     return [e for e in explanations if e.get("source") == "model" and _key(e) not in ratings]

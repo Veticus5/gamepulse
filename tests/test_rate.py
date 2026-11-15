@@ -38,3 +38,15 @@ def test_summary_splits_ratings_by_the_agents_verdict(tmp_path):
     report = rate.format_report(summary)
     assert "trafna w 2 z 3 ocenionych (67%)" in report
     assert "Brak ocenionych" in rate.format_report(rate.summarise(explanations, {}))
+
+
+def test_undo_removes_the_last_rated_explanation(tmp_path):
+    first, second = explanation("e1"), explanation("e2")
+    rate.save_rating(tmp_path, first, "correct")
+    rate.save_rating(tmp_path, second, "wrong")
+    rate.save_rating(tmp_path, second, "partly")  # rated twice: both rows go
+    assert rate.undo_last_rating(tmp_path) == "e2"
+    assert list(rate.load_ratings(tmp_path)) == [("e1", "h1")]
+    assert rate.undo_last_rating(tmp_path) == "e1"
+    assert rate.load_ratings(tmp_path) == {}
+    assert rate.undo_last_rating(tmp_path) is None
