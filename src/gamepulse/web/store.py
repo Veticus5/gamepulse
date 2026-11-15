@@ -14,7 +14,7 @@ import duckdb
 from gamepulse.config import Game
 from gamepulse.storage import read_jsonl
 from gamepulse.classify import priority_of
-from gamepulse.model import anomalies_path
+from gamepulse.model import anomalies_path, episodes_path
 from gamepulse.web.events import classify as rule_category
 
 MINUTE = 60_000
@@ -30,6 +30,9 @@ FIVEM_LIVE_SOURCE = "https://static.cfx.re/runtime/counts.json"
 # anything longer than this
 # between two runs counts as a gap (the computer was off, or Steam was down).
 GAP_THRESHOLD = 45 * MINUTE
+# How far before an episode its possible causes are looked for, per period length.
+NEWS_LEAD = {"day": 7 * DAY, "week": 14 * DAY, "month": 14 * DAY}
+EPISODE_NEWS_LIMIT = 40
 
 
 def _sql_list(files: list[Path]) -> str:
@@ -86,7 +89,7 @@ class Store:
         self._reviews: dict[int, dict] = {}
         self._meta: dict[int, dict] = {}
         self._events: dict[str, dict] = {}
-        self._anomalies: dict[int, list[dict]] = {}
+        self._episodes: dict[int, list[dict]] = {}
 
     # ------------------------------------------------------------ loading
 
@@ -161,40 +164,76 @@ class Store:
         if self._changed("events", files):
             # Later lines win, so a re-classification replaces the earlier label.
             self._events = {row.get("gid"): row for path in files for row in read_jsonl(path)}
-        path = anomalies_path(self.data_dir)
-        if self._changed("anomalies", [path] if path.exists() else []):
-            self._anomalies = self._load_anomalies(path) if path.exists() else {}
+        paths = [p for p in (episodes_path(self.data_dir), anomalies_path(self.data_dir)) if p.exists()]
+        if self._changed("episodes", paths):
+            self._episodes = self._load_episodes(*paths) if len(paths) == 2 else {}
         files = self._files("appdetails")
         if self._changed("meta", files):
             self._meta = self._latest_snapshots(files, "details")
 
-    def _load_anomalies(self, path: Path) -> dict[int, list[dict]]:
-        """Anomalies per game, newest first; a score and a volume anomaly of
-        the same period are shown together as one unusual period."""
-        rows = self._con.execute(
+    def _load_episodes(self, episodes: Path, anomalies: Path) -> dict[int, list[dict]]:
+        """Episodes per game, newest first, each with its periods in order."""
+        parts: dict[str, list[dict]] = {}
+        for episode_id, start_ms, end_ms, reviews, share, baseline_share, ratio, spike in self._con.execute(
             """
-            SELECT anomaly_id, appid, grain, epoch_ms(period_start::TIMESTAMP), epoch_ms(period_end::TIMESTAMP),
-                   kind, value::DOUBLE, baseline::DOUBLE, deviation::DOUBLE, reviews::BIGINT
-            FROM read_parquet(?)
-            ORDER BY period_start DESC, grain
+            SELECT episode_id, epoch_ms(period_start::TIMESTAMP), epoch_ms(period_end::TIMESTAMP),
+                   any_value(reviews)::BIGINT, any_value(share_positive)::DOUBLE, any_value(baseline_share)::DOUBLE,
+                   any_value(volume_ratio)::DOUBLE, bool_or(kind = 'review_volume_spike')
+            FROM read_parquet(?) GROUP BY ALL ORDER BY 2
             """,
-            [str(path)],
-        ).fetchall()
-        periods: dict[tuple, dict] = {}
-        for anomaly_id, appid, grain, start_ms, end_ms, kind, value, baseline, deviation, reviews in rows:
-            period = periods.setdefault(
-                (appid, grain, start_ms),
-                {"appid": appid, "grain": grain, "start_ms": start_ms, "end_ms": end_ms,
-                 "reviews": reviews, "score": None, "volume": None},
-            )
-            if kind == "review_volume_spike":
-                period["volume"] = {"id": anomaly_id, "value": int(value), "baseline": baseline, "ratio": round(deviation, 2)}
-            else:
-                period["score"] = {"id": anomaly_id, "kind": kind, "value": round(value, 4), "baseline": round(baseline, 4)}
+            [str(anomalies)],
+        ).fetchall():
+            parts.setdefault(episode_id, []).append({
+                "start_ms": start_ms, "end_ms": end_ms, "reviews": reviews, "share": round(share, 4),
+                "baseline_share": round(baseline_share, 4), "volume_ratio": round(ratio, 2), "volume_spike": spike,
+            })
         by_game: dict[int, list[dict]] = {}
-        for period in periods.values():
-            by_game.setdefault(period.pop("appid"), []).append(period)
+        for row in self._con.execute(
+            """
+            SELECT episode_id, appid, grain, direction, epoch_ms(period_start::TIMESTAMP),
+                   epoch_ms(period_end::TIMESTAMP), periods::BIGINT, reviews::BIGINT, positive::BIGINT,
+                   negative::BIGINT, share_positive::DOUBLE, baseline_share::DOUBLE, baseline_reviews::DOUBLE,
+                   volume_spike, peak_volume_ratio::DOUBLE, is_open
+            FROM read_parquet(?) ORDER BY period_start DESC, grain
+            """,
+            [str(episodes)],
+        ).fetchall():
+            by_game.setdefault(row[1], []).append({
+                "id": row[0], "grain": row[2], "direction": row[3], "start_ms": row[4], "end_ms": row[5],
+                "periods": row[6], "reviews": row[7], "positive": row[8], "negative": row[9],
+                "share": round(row[10], 4), "baseline_share": round(row[11], 4),
+                "baseline_reviews": round(row[12], 1), "volume_spike": row[13],
+                "peak_volume_ratio": round(row[14], 2), "is_open": row[15], "parts": parts.get(row[0], []),
+            })
         return by_game
+
+    def episode(self, appid: int, episode_id: str) -> dict | None:
+        """One episode with the official news around it: the evidence a
+        person (and later the agent) looks at first. Listing news here says
+        nothing about cause."""
+        if appid not in self._by_appid:
+            return None
+        with self._lock:
+            self._refresh()
+            found = next((e for e in self._episodes.get(appid, []) if e["id"] == episode_id), None)
+            if found is None:
+                return None
+            since = found["start_ms"] - NEWS_LEAD[found["grain"]]
+            news = [
+                self._news_dict(*row)
+                for row in self._rows(
+                    "SELECT gid, title, date_ms, feed_type, feedlabel, url, tags FROM news "
+                    "WHERE appid = ? AND feed_type = 1 ORDER BY date_ms",
+                    [appid],
+                )
+            ]
+        # Published in the window, or taking effect in it: an announcement
+        # made weeks earlier still belongs next to the episode it may explain.
+        end = found["end_ms"]
+        nearby = [n for n in news if since <= n["date_ms"] < end or since <= n["event_ms"] < end]
+        shown = sorted(sorted(nearby, key=lambda n: (-n["priority"], n["date_ms"]))[:EPISODE_NEWS_LIMIT],
+                       key=lambda n: n["date_ms"])
+        return {**found, "news_from_ms": since, "news_total": len(nearby), "news": shown}
 
     @staticmethod
     def _latest_snapshots(files: list[Path], key: str) -> dict[int, dict]:
@@ -456,7 +495,7 @@ class Store:
                     "monthly": review_points(results.get("rollups")),
                 },
                 "review_summary": self._review_summary(appid),
-                "anomalies": self._anomalies.get(appid, []),
+                "episodes": self._episodes.get(appid, []),
             }
 
     def news_list(self, appid: int, kind: str, query: str, offset: int, limit: int) -> dict | None:

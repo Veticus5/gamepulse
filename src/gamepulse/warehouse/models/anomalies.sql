@@ -43,15 +43,62 @@ found as (
     where reviews >= {{ var('volume_min_reviews') }}
       and volume_ratio >= {{ var('volume_ratio') }}
       and volume_z >= {{ var('z_threshold') }}
+),
+
+-- One row per unusual period, with the side it falls on.
+flagged as (
+    select
+        appid,
+        grain,
+        period_start,
+        period_end,
+        case
+            when bool_or(kind = 'review_score_drop') then 'negative'
+            when bool_or(kind = 'review_score_rise') then 'positive'
+            else 'volume'
+        end as direction
+    from found
+    group by all
+),
+
+-- Unusual periods that follow each other directly, on the same side, are
+-- one episode: six bad days in a row are one thing to explain, not six.
+chained as (
+    select
+        *,
+        lag(period_end) over (partition by appid, grain, direction order by period_start) as previous_end
+    from flagged
+),
+
+islands as (
+    select
+        *,
+        sum(case when previous_end = period_start then 0 else 1 end)
+            over (partition by appid, grain, direction order by period_start) as island
+    from chained
+),
+
+episodes as (
+    select
+        appid,
+        grain,
+        period_start,
+        direction,
+        -- Named after its first period, so the id stays the same while the episode grows.
+        md5(concat_ws('|', appid, grain, direction,
+            min(period_start) over (partition by appid, grain, direction, island))) as episode_id
+    from islands
 )
 
 select
     md5(concat_ws('|', appid, grain, period_start, kind)) as anomaly_id,
+    episode_id,
     appid,
     grain,
     period_start,
     period_end,
     kind,
+    direction,
     value,          -- share of positive reviews (0-1), or number of reviews for a volume spike
     baseline,       -- the usual value before this period
     deviation,      -- value minus baseline for scores; value divided by baseline for volume
@@ -59,6 +106,11 @@ select
     reviews,
     positive,
     negative,
+    share_positive,
+    baseline_share,
+    baseline_reviews,
+    volume_ratio,
     baseline_periods,
     fetched_at as data_as_of
 from found
+join episodes using (appid, grain, period_start)

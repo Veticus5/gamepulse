@@ -81,6 +81,7 @@ model językowy nie bierze w tym udziału.
 | `review_periods` | recenzje na grę i okres: miesiąc lub tydzień dla całej historii (jak podaje Steam), dzień dla ostatnich 30 dni i dalej |
 | `review_baselines` | zakończony okres obok mediany z poprzedzających okresów (12 miesięcy, 12 tygodni, 14 dni) |
 | `anomalies` | okresy wyraźnie odbiegające od tego, co zwykłe dla danej gry |
+| `anomaly_episodes` | epizody: kolejne nietypowe okresy po tej samej stronie (negatywne, pozytywne, sam skok liczby) połączone w jeden wiersz |
 
 Rodzaje anomalii (`kind`):
 
@@ -95,7 +96,13 @@ Progi są w `src/gamepulse/warehouse/dbt_project.yml` (`vars`). Ograniczenia:
 - Okres bez co najmniej 6 wcześniejszych zakończonych okresów nie jest oceniany,
   więc pierwsze miesiące gry po premierze nie dają anomalii.
 - Trwający miesiąc, tydzień i dzień są pomijane, bo mają niepełne liczby.
-- Dłuższy epizod daje osobną anomalię dla każdego okresu.
+- Epizod łączy tylko okresy bezpośrednio po sobie; jeden zwykły dzień w środku dzieli go na dwa.
+- Epizod dzienny i tygodniowy lub miesięczny tego samego zdarzenia są osobnymi wierszami.
+
+Interfejs pokazuje epizody. Kliknięcie epizodu otwiera jego przebieg i oficjalne
+newsy opublikowane lub wchodzące w życie od 7 dni (dla dni) albo 14 dni (dla
+tygodni i miesięcy) przed początkiem do końca epizodu. To zestawienie w czasie,
+nie wyjaśnienie przyczyn.
 
 ## Lista gier
 
@@ -119,6 +126,7 @@ niezależnie od tego i jako jedyne znajdzie wpis dodany ze starą datą.
 | `data/raw/fivem/RRRR-MM-DD.jsonl` | `ts, url, counts, ok, error`; jedna linia na źródło i pomiar |
 
 | `data/derived/anomalies.parquet` | tabela `anomalies`; czyta ją interfejs, a później agent |
+| `data/derived/anomaly_episodes.parquet` | tabela `anomaly_episodes`; jak wyżej |
 | `data/warehouse/gamepulse.duckdb` | baza dbt z wszystkimi modelami; do własnych zapytań, gdy `gamepulse model` nie działa |
 
 - Czasy są w UTC. Pliki są tylko dopisywane.

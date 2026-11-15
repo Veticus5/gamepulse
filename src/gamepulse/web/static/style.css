@@ -161,12 +161,24 @@ a.tile:hover { border-color: var(--accent); transform: translateY(-2px); }
 .news-list .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .news-list .summary { display: block; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
 
-.anomaly-list { list-style: none; margin: 0; padding: 0; }
-.anomaly-list li { display: grid; grid-template-columns: 170px 1fr auto; gap: 12px; align-items: baseline; padding: 8px 4px; border-top: 1px solid var(--line); }
-.anomaly-list li:first-child { border-top: 0; }
-.anomaly-list .date { color: var(--muted); font-size: 13px; }
-.anomaly-list .facts { display: flex; flex-direction: column; gap: 2px; }
-@media (max-width: 700px) { .anomaly-list li { grid-template-columns: 1fr; gap: 2px; } }
+.episodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.episode {
+  display: flex; flex-direction: column; gap: 6px; text-align: left; cursor: pointer;
+  background: var(--panel-2); color: inherit; font: inherit;
+  border: 1px solid var(--line); border-left: 3px solid var(--muted); border-radius: var(--radius); padding: 12px 14px;
+}
+.episode:hover { border-color: var(--muted); }
+.episode.negative { border-left-color: var(--down); }
+.episode.positive { border-left-color: var(--up); }
+.episode-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.episode .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.episode-figures { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+.episode-figures b { display: block; font-size: 20px; }
+.episode-figures i { font-style: normal; color: var(--muted); font-size: 12px; }
+table.parts { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+table.parts th, table.parts td { text-align: right; padding: 4px 6px; border-top: 1px solid var(--line); }
+table.parts th:first-child, table.parts td:first-child { text-align: left; }
+table.parts th { color: var(--muted); font-weight: normal; border-top: 0; }
 
 /* ---------- drawer */
 

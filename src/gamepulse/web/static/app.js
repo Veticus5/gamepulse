@@ -242,7 +242,7 @@ function badges(item) {
 
 function openDrawer(...nodes) {
   drawer.hidden = false;
-  drawerBody.replaceChildren(...nodes);
+  drawerBody.replaceChildren(...nodes.filter((node) => node != null));
 }
 
 async function openNews(appid, gid, back) {
@@ -445,14 +445,12 @@ function drawReviews(container, points, granularity, mode, markers, appid, anoma
     lineStyle: { color: COLORS.event, type: "dashed", width: 1, opacity: 0.55 },
     data: lines,
   };
-  // Unusual periods as a shaded band centred on the period's point.
+  // Episodes as one shaded band from their first period to their last.
   series[0].markArea = {
     silent: true,
-    data: anomalies.map((a) => {
-      const half = (a.end_ms - a.start_ms) / 2;
-      const down = a.score ? a.score.kind === "review_score_drop" : false;
-      const color = a.score ? (down ? COLORS.down : COLORS.up) : COLORS.event;
-      return [{ xAxis: a.start_ms - half, itemStyle: { color, opacity: 0.16 } }, { xAxis: a.start_ms + half }];
+    data: anomalies.map((e) => {
+      const half = (e.parts.length ? e.parts[0].end_ms - e.parts[0].start_ms : 0) / 2;
+      return [{ xAxis: e.start_ms - half, itemStyle: { color: EPISODE_COLOR[e.direction], opacity: 0.16 } }, { xAxis: e.end_ms - half }];
     }),
   };
   series.push({
@@ -564,50 +562,95 @@ function newsArchive(appid, totals) {
     el("div", { class: "more" }, more));
 }
 
-const GRAIN_LABEL = { day: "dzień", week: "tydzień", month: "miesiąc" };
+const GRAIN_UNIT = { day: ["dzień", "dni"], week: ["tydzień", "tyg."], month: ["miesiąc", "mies."] };
+const EPISODE_COLOR = { negative: COLORS.down, positive: COLORS.up, volume: COLORS.event };
+const EPISODE_TITLE = {
+  negative: "Wyjątkowo negatywny odbiór",
+  positive: "Wyjątkowo pozytywny odbiór",
+  volume: "Nietypowo dużo recenzji",
+};
+const pct1 = (share) => `${(Math.round(share * 1000) / 10).toLocaleString("pl-PL")}%`;
 
-function anomalyPeriod(a) {
-  if (a.grain === "month") return monthYearFmt.format(a.start_ms);
-  if (a.grain === "week") return `tydzień od ${dateFmt.format(a.start_ms)}`;
-  return dateFmt.format(a.start_ms);
+function episodeSpan(e) {
+  const last = e.parts.length ? e.parts[e.parts.length - 1].start_ms : e.start_ms;
+  if (e.grain === "month") {
+    return e.periods === 1 ? monthYearFmt.format(e.start_ms) : `${monthYearFmt.format(e.start_ms)} – ${monthYearFmt.format(last)}`;
+  }
+  const lastDay = e.end_ms - 86400000;
+  return e.start_ms === lastDay ? dateFmt.format(e.start_ms) : `${dayMonthFmt.format(e.start_ms)} – ${dateFmt.format(lastDay)}`;
 }
 
-function anomalyRow(a) {
-  const facts = [];
-  if (a.score) {
-    const down = a.score.kind === "review_score_drop";
-    facts.push(el("span", { class: down ? "down" : "up" },
-      `${down ? "Spadek" : "Wzrost"} ocen: ${Math.round(100 * a.score.value)}% pozytywnych, zwykle ${Math.round(100 * a.score.baseline)}%`));
-  }
-  if (a.volume) {
-    facts.push(el("span", {},
-      `Skok liczby recenzji: ${nf.format(a.volume.value)}, zwykle ${nf.format(Math.round(a.volume.baseline))} (${nf.format(a.volume.ratio)}×)`));
-  }
-  return el("li", {},
-    el("span", { class: "date" }, anomalyPeriod(a)),
-    el("span", { class: "facts" }, facts),
-    el("span", { class: "muted small" }, `${nf.format(a.reviews)} recenzji · ${GRAIN_LABEL[a.grain]}`));
+function episodeLength(e) {
+  const [one, many] = GRAIN_UNIT[e.grain];
+  return e.periods === 1 ? `1 ${one}` : `${e.periods} ${many}`;
 }
 
-// Unusual review periods found by code. The explanation is the agent's job and is not there yet.
-function anomalyPanel(anomalies) {
-  const SHOWN = 6;
-  const list = el("ul", { class: "anomaly-list" });
+function episodeCard(appid, e) {
+  return el("button", { class: `episode ${e.direction}`, onclick: () => openEpisode(appid, e) },
+    el("span", { class: "episode-head" },
+      el("strong", {}, EPISODE_TITLE[e.direction]),
+      e.is_open ? el("span", { class: "tag", title: "Kończy się na ostatnim zakończonym okresie w danych, więc może jeszcze trwać" }, "może trwać") : null),
+    el("span", { class: "muted small" }, `${episodeSpan(e)} · ${episodeLength(e)}`),
+    el("span", { class: "episode-figures" },
+      el("span", {}, el("b", {}, pct1(e.share)), el("i", {}, `pozytywnych, zwykle ${Math.round(100 * e.baseline_share)}%`)),
+      el("span", {}, el("b", {}, nf.format(e.reviews)),
+        el("i", {}, e.volume_spike ? `recenzji, w szczycie ${Math.round(e.peak_volume_ratio)}× więcej niż zwykle` : "recenzji"))));
+}
+
+async function openEpisode(appid, e) {
+  const reopen = () => openEpisode(appid, e);
+  const head = [
+    el("h3", {}, EPISODE_TITLE[e.direction]),
+    el("div", { class: "meta" }, `${episodeSpan(e)} · ${episodeLength(e)} · ${nf.format(e.reviews)} recenzji, ${pct1(e.share)} pozytywnych (zwykle ${Math.round(100 * e.baseline_share)}%)`),
+    el("table", { class: "parts" },
+      el("thead", {}, el("tr", {}, ["Okres", "Pozytywne", "Zwykle", "Recenzje"].map((h) => el("th", {}, h)))),
+      el("tbody", {}, e.parts.map((p) => el("tr", {},
+        el("td", {}, e.grain === "month" ? monthYearFmt.format(p.start_ms) : dateFmt.format(p.start_ms)),
+        el("td", {}, pct1(p.share)),
+        el("td", {}, `${Math.round(100 * p.baseline_share)}%`),
+        el("td", {}, nf.format(p.reviews), p.volume_spike ? el("span", { class: "muted" }, ` (${nf.format(p.volume_ratio)}×)`) : null))))),
+  ];
+  openDrawer(...head, el("p", { class: "muted" }, "Wczytywanie newsów…"));
+  try {
+    const detail = await api(`/api/games/${appid}/episodes/${encodeURIComponent(e.id)}`);
+    openDrawer(...head,
+      el("h4", {}, "Oficjalne newsy w pobliżu"),
+      el("div", { class: "meta" }, `Od ${dateFmt.format(detail.news_from_ms)} do końca epizodu: ${detail.news_total}`),
+      detail.news.length
+        ? el("ul", { class: "events" }, detail.news.map((item) =>
+            el("li", {}, el("button", { onclick: () => openNews(appid, item.gid, reopen) },
+              el("span", { class: "title" }, item.title || "(bez tytułu)"),
+              el("span", { class: "sub" }, badges(item), `opublikowano ${dateFmt.format(item.date_ms)}`,
+                item.date_ms < e.start_ms ? " (przed epizodem)" : " (w trakcie)",
+                item.effective_date ? ` · dotyczy ${dateFmt.format(item.event_ms)}` : "")))))
+        : el("p", { class: "muted" }, "Brak oficjalnych newsów w tym oknie."),
+      detail.news_total > detail.news.length
+        ? el("p", { class: "muted" }, `Pokazano ${detail.news.length} najważniejszych z ${detail.news_total}.`) : null,
+      el("p", { class: "muted fine" }, "To zestawienie w czasie, nie wyjaśnienie. News obok epizodu nie dowodzi, że go spowodował. Ocenę przyczyn doda agent."));
+  } catch (error) {
+    openDrawer(...head, el("p", { class: "muted" }, "Nie udało się wczytać newsów."));
+  }
+}
+
+// Unusual review episodes found by code. Explaining them is the agent's job.
+function episodePanel(appid, episodes) {
+  const SHOWN = 4;
+  const grid = el("div", { class: "episodes" });
   let all = false;
   const more = el("button", { class: "chip", onclick: () => { all = !all; paint(); } });
   function paint() {
-    list.replaceChildren(...(all ? anomalies : anomalies.slice(0, SHOWN)).map(anomalyRow));
-    more.textContent = all ? "Pokaż najnowsze" : `Pokaż wszystkie (${anomalies.length})`;
+    grid.replaceChildren(...(all ? episodes : episodes.slice(0, SHOWN)).map((e) => episodeCard(appid, e)));
+    more.textContent = all ? "Pokaż najnowsze" : `Pokaż wszystkie (${episodes.length})`;
   }
   paint();
   return el("div", { class: "panel" },
     el("div", { class: "panel-head" },
-      el("h2", {}, "Nietypowe okresy w recenzjach"),
-      el("span", { class: "muted" }, anomalies.length ? `wykryto ${anomalies.length}, od najnowszych` : ""),
-      anomalies.length > SHOWN ? more : null),
-    anomalies.length ? list : el("p", { class: "muted" }, "Nie wykryto nietypowych okresów albo analiza jeszcze nie była uruchomiona."),
+      el("h2", {}, "Nietypowe epizody w recenzjach"),
+      el("span", { class: "muted" }, episodes.length ? `wykryto ${episodes.length}, od najnowszych` : ""),
+      episodes.length > SHOWN ? more : null),
+    episodes.length ? grid : el("p", { class: "muted" }, "Nie wykryto nietypowych epizodów albo analiza jeszcze nie była uruchomiona."),
     el("div", { class: "chart-note" },
-      "Okres trafia tu, gdy odsetek pozytywnych recenzji wyraźnie odbiega od tego, co było zwykłe dla tej gry w poprzedzających okresach, albo gdy recenzji jest co najmniej trzy razy więcej niż zwykle. To wynik obliczeń, bez udziału modelu. Wyjaśnienia przyczyn doda agent w następnym kroku."));
+      "Epizod to jeden lub kilka kolejnych okresów, w których odsetek pozytywnych recenzji wyraźnie odbiega od zwykłego dla tej gry albo recenzji jest co najmniej trzy razy więcej niż zwykle. To wynik obliczeń, bez udziału modelu. Kliknij epizod, żeby zobaczyć jego przebieg i newsy z tego czasu."));
 }
 
 async function renderGame(appid, rangeKey, token) {
@@ -659,7 +702,10 @@ async function renderGame(appid, rangeKey, token) {
   } }, "Skala od zera");
   const firstPoint = data.ccu[0];
   const lastPoint = data.ccu[data.ccu.length - 1];
-  const rangeChange = data.ccu.length >= 2 && firstPoint[1]
+  // Over less than a day the first and last point mostly differ by the time
+  // of day, so the change is only shown once a full day is covered.
+  const covered = data.ccu.length >= 2 ? lastPoint[0] - firstPoint[0] : 0;
+  const rangeChange = covered >= 86400000 && firstPoint[1]
     ? Math.round((1000 * (lastPoint[1] - firstPoint[1])) / firstPoint[1]) / 10 : null;
   const collected = data.ccu_first_ts
     ? `Pomiary co 30 minut od ${dateTimeFmt.format(data.ccu_first_ts)}. Steam nie udostępnia wcześniejszej historii. Przerwa w linii oznacza, że kolektor nie działał.`
@@ -687,7 +733,7 @@ async function renderGame(appid, rangeKey, token) {
     const daily = granularity === "day";
     charts[1] = drawReviews(reviewsBox, daily ? data.reviews.daily : data.reviews.monthly, granularity, reviewMode,
       reviewMarkers ? (daily ? data.review_markers.daily : data.review_markers.monthly) : [], appid,
-      data.anomalies.filter((a) => (a.grain === "day") === daily));
+      data.episodes.filter((e) => (e.grain === "day") === daily));
   }
 
   // --- events
@@ -722,8 +768,11 @@ async function renderGame(appid, rangeKey, token) {
     el("div", { class: "panel" },
       el("div", { class: "panel-head" },
         el("h2", {}, "Aktywność graczy"),
-        rangeChange === null ? null : el("span", { class: "muted", title: "Ostatni pomiar względem pierwszego w wybranym okresie" },
-          "W tym okresie: ", changeNode(rangeChange) || "bez zmian"),
+        rangeChange === null
+          ? (data.ccu.length ? el("span", { class: "muted small", title: "Przy krótszym okresie różnica pokazuje głównie porę dnia, a nie trend" },
+              `Pomiary obejmują ${covered < 3600000 ? "mniej niż godzinę" : `${Math.floor(covered / 3600000)} godz.`}; zmiana pojawi się po dobie`) : null)
+          : el("span", { class: "muted", title: "Ostatni pomiar względem pierwszego pomiaru widocznego na wykresie" },
+              `Od ${dateTimeFmt.format(firstPoint[0])}: `, changeNode(rangeChange) || "bez zmian"),
         el("div", { class: "chips" }, markerToggle, scaleToggle, el("span", { class: "sep" }), RANGES.map(([key, label]) =>
           el("a", { class: `chip ${key === rangeKey ? "active" : ""}`, href: `#/game/${appid}/${key}` }, label)))),
       playersBox,
@@ -732,7 +781,7 @@ async function renderGame(appid, rangeKey, token) {
           el("span", {}, el("i", { style: `background:${COLORS.event}` }), "dzień z ważnym wydarzeniem"),
           el("span", {}, el("i", { style: `background:${COLORS.muted}` }), "dzień z innymi newsami")),
         collected)),
-    anomalyPanel(data.anomalies),
+    episodePanel(appid, data.episodes),
     el("div", { class: "panel" },
       el("div", { class: "panel-head" },
         el("h2", {}, "Najważniejsze wydarzenia"),

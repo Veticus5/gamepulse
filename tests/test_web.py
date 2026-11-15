@@ -243,43 +243,81 @@ def test_model_labels_replace_rules_and_move_markers_to_the_effective_date(data_
     assert result["news_totals"]["classified"] == 1
 
 
-def write_anomalies(data_dir, rows):
+def write_episodes(data_dir, episodes):
+    """Episodes as the dbt models publish them; each has `days`: (date, up, down)."""
     import duckdb
 
-    out = data_dir / "derived" / "anomalies.parquet"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    values = ", ".join(
-        f"('{r['id']}', {r['appid']}, '{r['grain']}', DATE '{r['start']}', DATE '{r['end']}', '{r['kind']}', "
-        f"{r['value']}, {r['baseline']}, {r['deviation']}, {r['score']}, {r['reviews']})"
-        for r in rows
+    derived = data_dir / "derived"
+    derived.mkdir(parents=True, exist_ok=True)
+    ep_rows, an_rows = [], []
+    for e in episodes:
+        days = e["days"]
+        up, down = sum(d[1] for d in days), sum(d[2] for d in days)
+        ep_rows.append(
+            f"('{e['id']}', {e['appid']}, 'day', '{e['direction']}', DATE '{days[0][0]}', DATE '{days[-1][0]}' + 1, "
+            f"{len(days)}, {up + down}, {up}, {down}, {up / (up + down)}, 0.5, 100.0, false, 1.5, {e.get('open', False)})"
+        )
+        kind = "review_score_drop" if e["direction"] == "negative" else "review_score_rise"
+        an_rows += [
+            f"('{e['id']}', DATE '{day}', DATE '{day}' + 1, '{kind}', {u + d}, {u / (u + d)}, 0.5, 1.5)"
+            for day, u, d in days
+        ]
+    duckdb.sql(
+        f"COPY (SELECT * FROM (VALUES {', '.join(ep_rows)}) t(episode_id, appid, grain, direction, period_start, "
+        "period_end, periods, reviews, positive, negative, share_positive, baseline_share, baseline_reviews, "
+        f"volume_spike, peak_volume_ratio, is_open)) TO '{derived / 'anomaly_episodes.parquet'}' (FORMAT parquet)"
     )
     duckdb.sql(
-        f"COPY (SELECT * FROM (VALUES {values}) t(anomaly_id, appid, grain, period_start, period_end, kind, "
-        f"value, baseline, deviation, score, reviews)) TO '{out}' (FORMAT parquet)"
+        f"COPY (SELECT * FROM (VALUES {', '.join(an_rows)}) t(episode_id, period_start, period_end, kind, reviews, "
+        f"share_positive, baseline_share, volume_ratio)) TO '{derived / 'anomalies.parquet'}' (FORMAT parquet)"
     )
 
 
-def test_game_lists_anomalies_grouped_by_period_newest_first(data_dir):
-    base = {"appid": 730, "grain": "month", "value": 0.3, "baseline": 0.9, "deviation": -0.6, "score": -18.2, "reviews": 5625}
-    write_anomalies(data_dir, [
-        {**base, "id": "a1", "start": "2022-08-01", "end": "2022-09-01", "kind": "review_score_drop"},
-        {**base, "id": "a2", "start": "2022-08-01", "end": "2022-09-01", "kind": "review_volume_spike",
-         "value": 5625, "baseline": 1347.5, "deviation": 4.17, "score": 4.1},
-        {**base, "id": "a3", "start": "2026-11-03", "end": "2026-11-04", "kind": "review_score_rise", "grain": "day",
-         "value": 0.95, "deviation": 0.05, "score": 4.0, "reviews": 400},
-        {**base, "id": "other", "appid": 570, "start": "2020-01-01", "end": "2020-02-01", "kind": "review_score_drop"},
+def day_of(ms):
+    return iso(ms)[:10]
+
+
+def test_game_lists_episodes_newest_first_with_their_periods(data_dir):
+    write_episodes(data_dir, [
+        {"id": "old", "appid": 730, "direction": "negative", "days": [("2026-01-05", 20, 80)]},
+        {"id": "new", "appid": 730, "direction": "positive", "open": True,
+         "days": [("2026-11-06", 90, 10), ("2026-11-07", 180, 20)]},
+        {"id": "other", "appid": 570, "direction": "negative", "days": [("2026-02-01", 1, 9)]},
     ])
     store = Store(data_dir, GAMES)
-    found = store.game(730, "30d", NOW)["anomalies"]
-    assert [(a["grain"], a["start_ms"]) for a in found] == [("day", 1793664000000), ("month", 1659312000000)]
-    month = found[1]
-    assert month["end_ms"] == 1661990400000
-    assert month["reviews"] == 5625
-    assert month["score"] == {"id": "a1", "kind": "review_score_drop", "value": 0.3, "baseline": 0.9}
-    assert month["volume"] == {"id": "a2", "value": 5625, "baseline": 1347.5, "ratio": 4.17}
-    assert found[0]["volume"] is None
-    assert store.game(413150, "30d", NOW)["anomalies"] == []
+    found = store.game(730, "30d", NOW)["episodes"]
+    assert [e["id"] for e in found] == ["new", "old"]
+    new = found[0]
+    assert (new["start_ms"], new["end_ms"]) == (1793923200000, 1794096000000)
+    assert (new["periods"], new["reviews"], new["positive"], new["share"]) == (2, 300, 270, 0.9)
+    assert new["direction"] == "positive" and new["is_open"] is True
+    assert [(p["reviews"], p["share"]) for p in new["parts"]] == [(100, 0.9), (200, 0.9)]
+    assert store.game(413150, "30d", NOW)["episodes"] == []
 
 
-def test_game_without_model_run_has_no_anomalies(data_dir):
-    assert Store(data_dir, GAMES).game(730, "30d", NOW)["anomalies"] == []
+def test_episode_comes_with_official_news_from_the_days_before_it(data_dir):
+    # Fixture news for 730: "a" official 2 days ago, "b" press 1 day ago, "old" official 400 days ago.
+    write_episodes(data_dir, [
+        {"id": "near", "appid": 730, "direction": "positive", "days": [(day_of(NOW), 90, 10)]},
+        {"id": "far", "appid": 730, "direction": "negative", "days": [(day_of(NOW - 100 * DAY), 10, 90)]},
+    ])
+    store = Store(data_dir, GAMES)
+    near = store.episode(730, "near")
+    assert [n["gid"] for n in near["news"]] == ["a"]
+    assert near["news_total"] == 1
+    assert near["news_from_ms"] == near["start_ms"] - 7 * DAY
+    assert near["parts"][0]["reviews"] == 100
+    assert store.episode(730, "far")["news"] == []
+    assert store.episode(730, "missing") is None
+    assert store.episode(570, "near") is None
+
+
+def test_game_without_model_run_has_no_episodes(data_dir):
+    assert Store(data_dir, GAMES).game(730, "30d", NOW)["episodes"] == []
+
+
+def test_episode_endpoint(data_dir):
+    write_episodes(data_dir, [{"id": "e1", "appid": 730, "direction": "positive", "days": [(day_of(NOW), 9, 1)]}])
+    client = TestClient(create_app(data_dir, GAMES))
+    assert client.get("/api/games/730/episodes/e1").json()["id"] == "e1"
+    assert client.get("/api/games/730/episodes/nope").status_code == 404

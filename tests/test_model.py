@@ -75,6 +75,14 @@ def anomalies(tmp_path_factory):
     # 8: a torn last line (collector was writing) must not break the run.
     (raw / "8.jsonl").write_text(json.dumps(snapshot(8, rollups=steady(year))) + '\n{"fetched_at": "2026-')
 
+    # 9: three bad months in a row are one episode; a later bad month with a
+    # flood of reviews is another.
+    write(9, snapshot(9, rollups=steady(year) + [
+        row("2026-01-01", 600, 400), row("2026-02-01", 600, 400), row("2026-03-01", 600, 400),
+        row("2026-04-01", 900, 100), row("2026-05-01", 900, 100), row("2026-06-01", 3000, 2000),
+        row("2026-07-01", 900, 100),
+    ]))
+
     count = model.run(data_dir)
     rows = model.load_anomalies(data_dir)
     assert count == len(rows)
@@ -148,3 +156,41 @@ def test_ids_are_unique_and_stable(anomalies):
 def test_no_review_data_gives_empty_result(tmp_path):
     assert model.run(tmp_path) == 0
     assert model.load_anomalies(tmp_path) == []
+    assert model.load_episodes(tmp_path) == []
+
+
+def episodes_of(data_dir, appid):
+    return [e for e in model.load_episodes(data_dir) if e["appid"] == appid]
+
+
+def test_neighbouring_periods_form_one_episode(anomalies):
+    data_dir, rows = anomalies
+    first, second = episodes_of(data_dir, 9)
+    assert (str(first["period_start"]), str(first["period_end"]), first["periods"]) == ("2026-01-01", "2026-04-01", 3)
+    assert first["direction"] == "negative"
+    assert (first["reviews"], first["positive"], first["negative"]) == (3000, 1800, 1200)
+    assert first["share_positive"] == pytest.approx(0.6)
+    assert first["baseline_share"] == pytest.approx(0.905, abs=0.01)
+    assert first["volume_spike"] is False
+    assert first["is_open"] is False
+    assert (str(second["period_start"]), second["periods"]) == ("2026-06-01", 1)
+    assert second["volume_spike"] is True
+    assert second["peak_volume_ratio"] == pytest.approx(5.0)
+    # Every anomaly row points at its episode.
+    mine = pick(rows, 9)
+    assert {r["episode_id"] for r in mine} == {first["episode_id"], second["episode_id"]}
+    assert sum(1 for r in mine if r["episode_id"] == first["episode_id"]) == 3
+
+
+def test_episode_directions_and_open_flag(anomalies):
+    data_dir, _ = anomalies
+    assert [e["direction"] for e in episodes_of(data_dir, 2)] == ["volume"]
+    assert [e["direction"] for e in episodes_of(data_dir, 6)] == ["positive"]
+    # The last finished day in the data: the episode may still be running.
+    assert [e["is_open"] for e in episodes_of(data_dir, 7)] == [True]
+    assert [e["is_open"] for e in episodes_of(data_dir, 1)] == [False]
+
+
+def test_episode_ids_are_unique(anomalies):
+    ids = [e["episode_id"] for e in model.load_episodes(anomalies[0])]
+    assert len(set(ids)) == len(ids)

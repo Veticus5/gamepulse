@@ -14,3 +14,12 @@ models:
         tests:
           - accepted_values:
               values: [review_score_drop, review_score_rise, review_volume_spike]
+  - name: anomaly_episodes
+    description: Runs of neighbouring unusual periods; the unit the agent explains.
+    columns:
+      - name: episode_id
+        tests: [unique, not_null]
+      - name: direction
+        tests:
+          - accepted_values:
+              values: [negative, positive, volume]

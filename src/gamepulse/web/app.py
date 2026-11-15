@@ -39,6 +39,13 @@ def create_app(data_dir: Path, games: list[Game], eval_dir: Path = Path("eval"))
             raise HTTPException(404, "game is not tracked")
         return result
 
+    @app.get("/api/games/{appid}/episodes/{episode_id}")
+    def episode(appid: int, episode_id: str) -> dict:
+        result = store.episode(appid, episode_id)
+        if result is None:
+            raise HTTPException(404, "episode not found")
+        return result
+
     @app.get("/api/games/{appid}/news")
     def news_list(
         appid: int,
