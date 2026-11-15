@@ -15,6 +15,7 @@ uv run gamepulse reviews        # histogram recenzji (Steam)
 uv run gamepulse fivem          # łączna liczba graczy FiveM (poza Steamem)
 uv run gamepulse meta           # metadane gier ze sklepu Steam (studio, premiera, gatunki)
 uv run gamepulse model          # modele dbt i wykrywanie anomalii w recenzjach
+uv run gamepulse explain        # agent: możliwe przyczyny epizodów w recenzjach (lokalny model)
 uv run gamepulse web            # interfejs pod http://127.0.0.1:8765
 uv run pytest -q                # testy, bez sieci
 ```
@@ -103,6 +104,35 @@ Interfejs pokazuje epizody. Kliknięcie epizodu otwiera jego przebieg i oficjaln
 newsy opublikowane lub wchodzące w życie od 7 dni (dla dni) albo 14 dni (dla
 tygodni i miesięcy) przed początkiem do końca epizodu. To zestawienie w czasie,
 nie wyjaśnienie przyczyn.
+
+## Agent wyjaśniający epizody
+
+`uv run gamepulse explain` prosi lokalny model (Ollama, domyślnie `qwen3.8:27b`)
+o możliwe przyczyny epizodów zakończonych w ostatnich 90 dniach
+(`--since-days`, `--limit`, `--model`). Jedno wywołanie na epizod, około 4 sekund,
+bez narzędzi. Epizod jest analizowany ponownie tylko wtedy, gdy zmieniły się jego
+liczby, newsy wokół niego, prompt albo model.
+
+1. Kod składa paczkę dowodów: liczby epizodu i do 12 oficjalnych newsów z okna
+   wokół niego, każdy z identyfikatorem (N1, N2, ...).
+2. Model zwraca werdykt (`likely`, `possible`, `unknown`), podsumowanie i do 3 hipotez.
+   Każda hipoteza musi wskazać identyfikatory newsów, na których się opiera.
+3. Kod sprawdza odpowiedź:
+   - hipoteza bez istniejącego dowodu jest odrzucana;
+   - tekst z liczbą, której nie ma w paczce, jest odrzucany (model nie liczy);
+   - hipoteza oparta tylko na newsach opublikowanych po pierwszym dniu epizodu
+     dostaje oznaczenie „tłumaczy ciąg dalszy", a bez hipotezy o początku werdykt
+     to najwyżej `possible`;
+   - bez żadnej hipotezy werdykt to `unknown`.
+4. Gdy w oknie nie ma newsów, odpowiada kod (`unknown`), a model nie jest pytany.
+
+Ograniczenia: model nie widzi treści recenzji, więc hipotezy opierają się na
+zbieżności w czasie i treści newsa, nie na tym, co pisali gracze. Trafności
+wyjaśnień nikt jeszcze nie zmierzył; nie ma do tego ręcznie oznaczonej próbki.
+
+Wyniki: `data/derived/explanations/<appid>.jsonl` (ostatnia linia dla epizodu wygrywa,
+razem z odrzuconymi twierdzeniami w polu `dropped`). Każde wywołanie modelu jest
+w `data/derived/agent_runs/`.
 
 ## Lista gier
 

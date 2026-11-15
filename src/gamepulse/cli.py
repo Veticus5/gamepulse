@@ -1,4 +1,4 @@
-"""Command line entry point: ``gamepulse <collector>|classify|model|eval-sample|eval-classifier|web``."""
+"""Command line entry point: ``gamepulse <collector>|classify|model|explain|eval-sample|eval-classifier|web``."""
 
 import argparse
 import fcntl
@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import IO
 
-from gamepulse import classify, evaluate, model, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
+from gamepulse import classify, evaluate, explain, model, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
 from gamepulse.config import load_games
 from gamepulse.steam import make_client
 
@@ -32,6 +32,10 @@ def _parser() -> argparse.ArgumentParser:
     cls.add_argument("--since-days", type=int, default=90, help="only news this recent (default 90)")
     cls.add_argument("--limit", type=int, default=None, help="classify at most this many items")
     cls.add_argument("--model", default=classify.DEFAULT_MODEL, help="Ollama model name")
+    exp = sub.add_parser("explain", parents=[steam], help="explain review episodes with the local model")
+    exp.add_argument("--since-days", type=int, default=90, help="only episodes that ended this recently (default 90)")
+    exp.add_argument("--limit", type=int, default=None, help="explain at most this many episodes")
+    exp.add_argument("--model", default=classify.DEFAULT_MODEL, help="Ollama model name")
     sample = sub.add_parser("eval-sample", parents=[steam], help="draw the news sample to label by hand")
     sample.add_argument("--size", type=int, default=100)
     sample.add_argument("--since-days", type=int, default=365)
@@ -136,6 +140,9 @@ def main(argv: list[str] | None = None) -> int:
                 client, games, args.data_dir,
                 since_days=args.since_days, limit=args.limit, model=args.model,
             )
+        elif args.command == "explain":
+            explain.run(client, games, args.data_dir, since_days=args.since_days, limit=args.limit, model=args.model)
+            succeeded = 1  # nothing new to explain is not a failure
         elif args.command == "meta":
             succeeded = collect_meta.run(client, games, args.data_dir)
         else:

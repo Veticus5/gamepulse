@@ -321,3 +321,27 @@ def test_episode_endpoint(data_dir):
     client = TestClient(create_app(data_dir, GAMES))
     assert client.get("/api/games/730/episodes/e1").json()["id"] == "e1"
     assert client.get("/api/games/730/episodes/nope").status_code == 404
+
+
+def test_episode_carries_the_agents_explanation(data_dir):
+    write_episodes(data_dir, [
+        {"id": "e1", "appid": 730, "direction": "positive", "days": [(day_of(NOW), 9, 1)]},
+        {"id": "e2", "appid": 730, "direction": "negative", "days": [(day_of(NOW - 50 * DAY), 1, 9)]},
+    ])
+    record = {
+        "episode_id": "e1", "appid": 730, "verdict": "possible", "summary": "Zbieżne z łatką.", "source": "model",
+        "hypotheses": [{"claim": "Łatka mogła pomóc.", "evidence": ["N1", "N5"], "confidence": "low", "explains": "start"}],
+        "evidence": [{"id": "N1", "gid": "a", "title": "Patch", "published": "2026-11-12", "timing": "before"}],
+        "missing": "Treść recenzji.", "model": "m", "explained_at": "2026-11-14T12:00:00Z", "dropped": [{}],
+    }
+    append_jsonl(data_dir / "derived" / "explanations" / "730.jsonl", [{**record, "verdict": "unknown"}, record])
+    store = Store(data_dir, GAMES)
+    cards = {e["id"]: e["explanation"] for e in store.game(730, "30d", NOW)["episodes"]}
+    assert cards == {"e1": {"verdict": "possible", "summary": "Zbieżne z łatką.", "source": "model"}, "e2": None}
+    full = store.episode(730, "e1")["explanation"]
+    assert full["hypotheses"] == [{
+        "claim": "Łatka mogła pomóc.", "confidence": "low", "explains": "start",
+        "evidence": [{"id": "N1", "gid": "a", "title": "Patch"}],  # an id the record does not hold is left out
+    }]
+    assert (full["missing"], full["model"], full["dropped"], full["evidence_count"]) == ("Treść recenzji.", "m", 1, 1)
+    assert store.episode(730, "e2")["explanation"] is None

@@ -90,6 +90,7 @@ class Store:
         self._meta: dict[int, dict] = {}
         self._events: dict[str, dict] = {}
         self._episodes: dict[int, list[dict]] = {}
+        self._explanations: dict[str, dict] = {}
 
     # ------------------------------------------------------------ loading
 
@@ -167,6 +168,12 @@ class Store:
         paths = [p for p in (episodes_path(self.data_dir), anomalies_path(self.data_dir)) if p.exists()]
         if self._changed("episodes", paths):
             self._episodes = self._load_episodes(*paths) if len(paths) == 2 else {}
+        files = sorted((self.data_dir / "derived" / "explanations").glob("*.jsonl"))
+        if self._changed("explanations", files):
+            # Later lines win, so a newer explanation replaces the earlier one.
+            self._explanations = {
+                row["episode_id"]: row for path in files for row in read_jsonl(path) if "episode_id" in row
+            }
         files = self._files("appdetails")
         if self._changed("meta", files):
             self._meta = self._latest_snapshots(files, "details")
@@ -233,7 +240,33 @@ class Store:
         nearby = [n for n in news if since <= n["date_ms"] < end or since <= n["event_ms"] < end]
         shown = sorted(sorted(nearby, key=lambda n: (-n["priority"], n["date_ms"]))[:EPISODE_NEWS_LIMIT],
                        key=lambda n: n["date_ms"])
-        return {**found, "news_from_ms": since, "news_total": len(nearby), "news": shown}
+        return {**found, "news_from_ms": since, "news_total": len(nearby), "news": shown,
+                "explanation": self._explanation(found["id"], full=True)}
+
+    def _explanation(self, episode_id: str, *, full: bool = False) -> dict | None:
+        """The agent's answer for an episode: the verdict and summary for a
+        card, plus hypotheses with the news they cite for the detail view."""
+        row = self._explanations.get(episode_id)
+        if row is None:
+            return None
+        brief = {"verdict": row.get("verdict"), "summary": row.get("summary") or "", "source": row.get("source")}
+        if not full:
+            return brief
+        cited = {e["id"]: e for e in row.get("evidence") or []}
+        return {
+            **brief,
+            "hypotheses": [
+                {**h, "evidence": [
+                    {"id": i, "gid": cited[i]["gid"], "title": cited[i].get("title")} for i in h["evidence"] if i in cited
+                ]}
+                for h in row.get("hypotheses") or []
+            ],
+            "missing": row.get("missing") or "",
+            "model": row.get("model"),
+            "explained_at": row.get("explained_at"),
+            "evidence_count": len(cited),
+            "dropped": len(row.get("dropped") or []),
+        }
 
     @staticmethod
     def _latest_snapshots(files: list[Path], key: str) -> dict[int, dict]:
@@ -495,7 +528,9 @@ class Store:
                     "monthly": review_points(results.get("rollups")),
                 },
                 "review_summary": self._review_summary(appid),
-                "episodes": self._episodes.get(appid, []),
+                "episodes": [
+                    {**e, "explanation": self._explanation(e["id"])} for e in self._episodes.get(appid, [])
+                ],
             }
 
     def news_list(self, appid: int, kind: str, query: str, offset: int, limit: int) -> dict | None:

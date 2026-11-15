@@ -585,6 +585,45 @@ function episodeLength(e) {
   return e.periods === 1 ? `1 ${one}` : `${e.periods} ${many}`;
 }
 
+const VERDICT = {
+  likely: ["Prawdopodobna przyczyna", ""],
+  possible: ["Możliwa przyczyna", ""],
+  unknown: ["Przyczyna nieznana", "muted"],
+};
+const CONFIDENCE_LABEL = { high: "pewność wysoka", medium: "pewność średnia", low: "pewność niska" };
+
+function verdictLine(explanation) {
+  if (!explanation) return el("span", { class: "muted small" }, "Agent jeszcze nie analizował tego epizodu.");
+  const [label, tone] = VERDICT[explanation.verdict] || VERDICT.unknown;
+  return el("span", { class: "verdict" }, el("b", { class: tone }, label),
+    explanation.summary ? el("span", { class: "muted" }, ` ${explanation.summary}`) : null);
+}
+
+function explanationBlock(appid, e, explanation, reopen) {
+  if (!explanation) {
+    return [el("h4", {}, "Wyjaśnienie agenta"),
+      el("p", { class: "muted" }, "Agent jeszcze nie analizował tego epizodu. Uruchom: gamepulse explain")];
+  }
+  const [label, tone] = VERDICT[explanation.verdict] || VERDICT.unknown;
+  return [
+    el("h4", {}, "Wyjaśnienie agenta"),
+    el("div", { class: "labelbox" },
+      el("div", {}, el("b", { class: tone }, label)),
+      explanation.summary ? el("div", {}, explanation.summary) : null,
+      explanation.hypotheses.length ? el("ol", { class: "hypotheses" }, explanation.hypotheses.map((h) =>
+        el("li", {},
+          el("div", {}, h.claim),
+          el("div", { class: "muted fine" },
+            `${CONFIDENCE_LABEL[h.confidence] || ""} · ${h.explains === "start" ? "może tłumaczyć początek epizodu" : "może tłumaczyć tylko ciąg dalszy, nie początek"}`),
+          el("div", { class: "cites" }, h.evidence.map((c) =>
+            el("button", { class: "link", onclick: () => openNews(appid, c.gid, reopen) }, `${c.id}: ${c.title || "(bez tytułu)"}`)))))) : null,
+      explanation.missing ? el("div", { class: "muted" }, `Czego brakuje do pewności: ${explanation.missing}`) : null,
+      el("div", { class: "muted fine" }, explanation.source === "code"
+        ? "Odpowiedź z kodu: bez newsów w oknie model nie był pytany."
+        : `Lokalny model (${explanation.model}) dostał liczby epizodu i ${explanation.evidence_count} oficjalnych newsów, bez treści recenzji. Nie wie, co pisali gracze, więc to hipotezy oparte na zbieżności w czasie. Kod odrzucił twierdzenia bez dowodu lub z liczbami spoza danych${explanation.dropped ? ` (${explanation.dropped})` : ""}.`)),
+  ];
+}
+
 function episodeCard(appid, e) {
   return el("button", { class: `episode ${e.direction}`, onclick: () => openEpisode(appid, e) },
     el("span", { class: "episode-head" },
@@ -594,7 +633,8 @@ function episodeCard(appid, e) {
     el("span", { class: "episode-figures" },
       el("span", {}, el("b", {}, pct1(e.share)), el("i", {}, `pozytywnych, zwykle ${Math.round(100 * e.baseline_share)}%`)),
       el("span", {}, el("b", {}, nf.format(e.reviews)),
-        el("i", {}, e.volume_spike ? `recenzji, w szczycie ${Math.round(e.peak_volume_ratio)}× więcej niż zwykle` : "recenzji"))));
+        el("i", {}, e.volume_spike ? `recenzji, w szczycie ${Math.round(e.peak_volume_ratio)}× więcej niż zwykle` : "recenzji"))),
+    verdictLine(e.explanation));
 }
 
 async function openEpisode(appid, e) {
@@ -614,6 +654,7 @@ async function openEpisode(appid, e) {
   try {
     const detail = await api(`/api/games/${appid}/episodes/${encodeURIComponent(e.id)}`);
     openDrawer(...head,
+      ...explanationBlock(appid, e, detail.explanation, reopen),
       el("h4", {}, "Oficjalne newsy w pobliżu"),
       el("div", { class: "meta" }, `Od ${dateFmt.format(detail.news_from_ms)} do końca epizodu: ${detail.news_total}`),
       detail.news.length
@@ -626,7 +667,7 @@ async function openEpisode(appid, e) {
         : el("p", { class: "muted" }, "Brak oficjalnych newsów w tym oknie."),
       detail.news_total > detail.news.length
         ? el("p", { class: "muted" }, `Pokazano ${detail.news.length} najważniejszych z ${detail.news_total}.`) : null,
-      el("p", { class: "muted fine" }, "To zestawienie w czasie, nie wyjaśnienie. News obok epizodu nie dowodzi, że go spowodował. Ocenę przyczyn doda agent."));
+      el("p", { class: "muted fine" }, "To zestawienie w czasie. News obok epizodu nie dowodzi, że go spowodował."));
   } catch (error) {
     openDrawer(...head, el("p", { class: "muted" }, "Nie udało się wczytać newsów."));
   }
@@ -650,7 +691,7 @@ function episodePanel(appid, episodes) {
       episodes.length > SHOWN ? more : null),
     episodes.length ? grid : el("p", { class: "muted" }, "Nie wykryto nietypowych epizodów albo analiza jeszcze nie była uruchomiona."),
     el("div", { class: "chart-note" },
-      "Epizod to jeden lub kilka kolejnych okresów, w których odsetek pozytywnych recenzji wyraźnie odbiega od zwykłego dla tej gry albo recenzji jest co najmniej trzy razy więcej niż zwykle. To wynik obliczeń, bez udziału modelu. Kliknij epizod, żeby zobaczyć jego przebieg i newsy z tego czasu."));
+      "Epizod to jeden lub kilka kolejnych okresów, w których odsetek pozytywnych recenzji wyraźnie odbiega od zwykłego dla tej gry albo recenzji jest co najmniej trzy razy więcej niż zwykle. Epizody wykrywa kod, bez udziału modelu. Przyczynę proponuje lokalny model na podstawie oficjalnych newsów; „przyczyna nieznana” to pełnoprawna odpowiedź. Kliknij epizod, żeby zobaczyć przebieg, hipotezy z dowodami i newsy z tego czasu."));
 }
 
 async function renderGame(appid, rangeKey, token) {
