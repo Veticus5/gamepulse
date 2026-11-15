@@ -1,9 +1,9 @@
-"""Player counts only, for running where the rest of the project is not installed.
+"""Player counts and prices, for running where the rest of the project is not installed.
 
-Player counts are the one thing Steam keeps no history of, so they are
+Player counts and store prices are what Steam keeps no history of, so they are
 collected around the clock by a scheduled GitHub Actions workflow instead
 of a computer that is switched off at night. This entry point imports
-nothing but the two collectors (httpx is the only dependency), so a run
+nothing but those collectors (httpx is the only dependency), so a run
 needs no project install and finishes in seconds:
 
     PYTHONPATH=src python -m gamepulse.remote --games games.toml --data-dir out
@@ -14,7 +14,7 @@ import logging
 import sys
 from pathlib import Path
 
-from gamepulse import collect_ccu, collect_fivem
+from gamepulse import collect_ccu, collect_fivem, collect_prices
 from gamepulse.config import load_games
 from gamepulse.steam import make_client
 
@@ -30,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     with make_client() as client:
         steam = collect_ccu.run(client, games, args.data_dir)
         fivem = collect_fivem.run(client, args.data_dir)
+        collect_prices.run(client, games, args.data_dir)  # a bonus: its failure does not fail the run
     return 0 if steam or fivem else 1
 
 

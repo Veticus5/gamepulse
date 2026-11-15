@@ -44,7 +44,7 @@ from gamepulse.storage import append_jsonl, read_jsonl, utc_now_iso
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "e4"
+PROMPT_VERSION = "e5"
 # How many days before an episode its possible causes are looked for, per period length.
 NEWS_LEAD_DAYS = {"day": 7, "week": 14, "month": 14}
 MAX_EVIDENCE = 12
@@ -98,6 +98,9 @@ You get FACTS (numbers computed by code) and EVIDENCE of up to three kinds:
   players reacted. They are second-hand: weaker than N for what the studio did.
 - R: a sample of player reviews written during the episode, if any were collected.
   This is the only direct evidence of what players thought.
+- D: a discount in the Steam store, recorded by code. A discount brings in new
+  players and so more reviews; it explains a jump in the number of reviews far
+  better than a change of mood.
 
 Rules:
 - Every hypothesis must cite the ids of the evidence it rests on. No id, no hypothesis.
@@ -217,6 +220,51 @@ def candidate_press(episode: dict, news: list[dict]) -> list[dict]:
     return [{"id": f"P{index}", **item} for index, item in enumerate(kept, 1)]
 
 
+def load_discounts(data_dir: Path, appid: int) -> tuple[date | None, dict[date, int]]:
+    """The first day with price data for the game and the highest discount
+    seen on each day that had one."""
+    first = None
+    daily: dict[date, int] = {}
+    for path in sorted((data_dir / "raw" / "prices").glob("*.jsonl")):
+        for row in read_jsonl(path):
+            if row.get("appid") != appid or not isinstance(row.get("ts"), str):
+                continue
+            try:
+                day = date.fromisoformat(row["ts"][:10])
+            except ValueError:
+                continue
+            first = day if first is None or day < first else first
+            percent = row.get("discount_percent") or 0
+            if percent > 0:
+                daily[day] = max(percent, daily.get(day, 0))
+    return first, daily
+
+
+def candidate_discounts(episode: dict, daily: dict[date, int]) -> list[dict]:
+    """Runs of discounted days that overlap the window around the episode."""
+    start, end = _day(episode["period_start"]), _day(episode["period_end"])
+    since = start - timedelta(days=NEWS_LEAD_DAYS[episode["grain"]])
+    runs: list[list[date]] = []
+    for day in sorted(daily):
+        if runs and day - runs[-1][-1] == timedelta(days=1):
+            runs[-1].append(day)
+        else:
+            runs.append([day])
+    found = [run for run in runs if run[0] < end and run[-1] >= since]
+    return [
+        {
+            "id": f"D{index}",
+            "kind": "discount",
+            "published": run[0],
+            "effective": None,
+            "until": run[-1].isoformat(),
+            "percent": max(daily[day] for day in run),
+            "timing": _timing(run[0], start),
+        }
+        for index, run in enumerate(found, 1)
+    ]
+
+
 def pick_reviews(episode: dict, reviews: list[dict]) -> list[dict]:
     """A fixed sample of the reviews written during the episode.
 
@@ -260,10 +308,14 @@ def pick_reviews(episode: dict, reviews: list[dict]) -> list[dict]:
 def build_pack(
     game: Game, episode: dict, parts: list[dict], news: list[dict], events: dict[str, dict],
     reviews: list[dict] | None = None,
+    prices: tuple[date | None, dict[date, int]] = (None, {}),
 ) -> dict:
     """Everything the model is shown for one episode, as plain data."""
     reviews = reviews or []
-    evidence = candidate_news(episode, news, events) + candidate_press(episode, news) + pick_reviews(episode, reviews)
+    evidence = (
+        candidate_news(episode, news, events) + candidate_press(episode, news)
+        + candidate_discounts(episode, prices[1]) + pick_reviews(episode, reviews)
+    )
     periods = sorted({(_day(p["period_start"]), p["reviews"], p["share_positive"], p["baseline_share"]) for p in parts})
     return {
         "episode_id": episode["episode_id"],
@@ -283,6 +335,8 @@ def build_pack(
         ],
         # How many reviews of the episode are on disk; the sample is drawn from these.
         "reviews_collected": len({r.get("recommendationid") for r in reviews}),
+        # Before this day nothing is known about the price, which is not the same as "no discount".
+        "price_data_from": prices[0].isoformat() if prices[0] else None,
         "evidence": [
             {**item, "published": item["published"].isoformat(),
              "effective": item["effective"].isoformat() if item["effective"] else None}
@@ -314,7 +368,7 @@ def render_pack(pack: dict) -> str:
     when_text = {"before": "before the episode began", "first_day": "on the episode's first day",
                  "during": "after the episode began"}
     for item in pack["evidence"]:
-        if item["kind"] == "review":
+        if item["kind"] in ("review", "discount"):
             continue
         label = "official post" if item["kind"] == "news" else f"press article ({item.get('source') or 'unknown outlet'})"
         lines += [
@@ -323,6 +377,19 @@ def render_pack(pack: dict) -> str:
             + (f", type {item['type']}" if item.get("type") else ""),
             f"<post>\nTitle: {item['title']}\n{item['excerpt']}\n</post>",
         ]
+    discounts = [item for item in pack["evidence"] if item["kind"] == "discount"]
+    lines.append("")
+    if discounts:
+        lines.append("STORE PRICE")
+        lines += [
+            f"[{item['id']}] discount of {item['percent']}% from {item['published']} to {item['until']} "
+            f"(started {when_text[item['timing']]})"
+            for item in discounts
+        ]
+    elif pack.get("price_data_from") and pack["price_data_from"] <= pack["start"]:
+        lines.append("STORE PRICE: no discount around the episode.")
+    else:
+        lines.append("STORE PRICE: not recorded for this period, so a discount cannot be ruled out.")
     sample = [item for item in pack["evidence"] if item["kind"] == "review"]
     if sample:
         lines += [
@@ -359,7 +426,7 @@ def _numbers(text: str) -> set[str]:
 def _invented(text: str, allowed: set[str]) -> list[str]:
     """Numbers in the text that the pack does not contain. A day.month date
     such as 24.10 reads as a decimal; it is fine when both halves are known."""
-    return sorted(n for n in _numbers(re.sub(r"\b[NPR]\d+\b", "", text)) - allowed
+    return sorted(n for n in _numbers(re.sub(r"\b[NPRD]\d+\b", "", text)) - allowed
                   if not all((part.lstrip("0") or "0") in allowed for part in n.split(".")))
 
 
@@ -391,7 +458,7 @@ def validate(answer: str, pack: dict) -> dict:
     timing = {item["id"]: item["timing"] for item in pack["evidence"]}
     known = set(timing)
     # Evidence ids are not numbers the model made up.
-    allowed = _numbers(re.sub(r"\[[NPR]\d+\]", "", render_pack(pack)))
+    allowed = _numbers(re.sub(r"\[[NPRD]\d+\]", "", render_pack(pack)))
     dropped = []
     hypotheses = []
     for raw in data.get("hypotheses") if isinstance(data.get("hypotheses"), list) else []:
@@ -549,7 +616,7 @@ def run(
             )
         news, events, done = cache[game.appid]
         pack = build_pack(game, episode, parts.get(episode["episode_id"], []), news, events,
-                          load_episode_reviews(data_dir, episode))
+                          load_episode_reviews(data_dir, episode), load_discounts(data_dir, game.appid))
         digest = _pack_hash(pack)
         previous = done.get(episode["episode_id"])
         uses_model = bool(pack["evidence"])
@@ -567,6 +634,8 @@ def run(
                 {key: item[key] for key in (
                     ("id", "kind", "published", "voted_up", "language", "playtime_hours", "excerpt")
                     if item["kind"] == "review" else
+                    ("id", "kind", "published", "until", "percent", "timing")
+                    if item["kind"] == "discount" else
                     ("id", "kind", "gid", "title", "published", "effective", "timing")
                 )}
                 for item in pack["evidence"]

@@ -13,6 +13,7 @@ uv run gamepulse news           # nowe newsy (Steam)
 uv run gamepulse news --full    # cała historia newsów
 uv run gamepulse reviews        # histogram recenzji (Steam)
 uv run gamepulse review-texts   # treść recenzji z językiem i czasem gry (Steam)
+uv run gamepulse prices         # cena i przecena każdej gry w sklepie Steam
 uv run gamepulse fivem          # łączna liczba graczy FiveM (poza Steamem)
 uv run gamepulse meta           # metadane gier ze sklepu Steam (studio, premiera, gatunki)
 uv run gamepulse pull-remote    # pomiary liczby graczy zebrane przez GitHub Actions
@@ -80,7 +81,8 @@ Dlatego liczbę graczy (Steam i FiveM) zbiera workflow
 włączony. Newsy i recenzje da się pobrać wstecz, więc zostają lokalnie.
 
 - Workflow rusza dwa razy na godzinę (7 i 37 minut po pełnej godzinie) i dopisuje
-  pomiary do gałęzi `data` w plikach `raw/ccu/` i `raw/fivem/`.
+  pomiary do gałęzi `data` w plikach `raw/ccu/`, `raw/fivem/` i `raw/prices/`.
+  Ceny (sklep USA, jedno zapytanie na wszystkie gry) też nie mają historii w Steamie.
 - GitHub nie gwarantuje punktualności: przebieg bywa opóźniony o kilka–kilkanaście
   minut, a czasem wypada. Każdy pomiar ma zapisany rzeczywisty czas.
 - Przebieg nie instaluje projektu, tylko `httpx`, żeby zmieścić się w minucie.
@@ -161,6 +163,8 @@ liczby, newsy wokół niego, prompt albo model.
    - **N**: do 12 oficjalnych newsów z okna wokół epizodu;
    - **P**: do 6 artykułów prasowych, które Steam podaje dla gry (PC Gamer, PCGamesN,
      Rock Paper Shotgun i inne), najbliższych początkowi epizodu;
+   - **D**: przeceny w sklepie Steam zapisane przez kolektor cen (dopiero od
+     15 listopada 2026 r.; brak danych o cenie nie jest zgłaszany jako brak przeceny);
    - **R**: próbka 30 recenzji graczy napisanych w trakcie epizodu, jeśli są zebrane.
      Większość z tej strony, po której jest epizod; połowa to recenzje najczęściej
      oznaczane jako pomocne, połowa losowa (zawsze ta sama). Recenzje krótsze niż
@@ -207,6 +211,7 @@ niezależnie od tego i jako jedyne znajdzie wpis dodany ze starą datą.
 | `data/raw/news/<appid>.jsonl` | surowy wpis Steam plus `fetched_at`; kolektor nie zapisuje drugi raz tego samego `gid` |
 | `data/raw/review_histogram/<appid>.jsonl` | `fetched_at, appid, results`; pełna migawka na każde pobranie |
 | `data/raw/reviews/<appid>.jsonl` | jedna recenzja na linię: treść, ocena, język, czas gry, sposób zakupu, daty; bez danych recenzenta |
+| `data/raw/prices/RRRR-MM-DD.jsonl` | `ts, appid, priced, currency, initial, final, discount_percent`; kwoty w centach |
 | `data/raw/appdetails/<appid>.jsonl` | `fetched_at, appid, details`; wybrane pola ze sklepu Steam |
 | `data/raw/fivem/RRRR-MM-DD.jsonl` | `ts, url, counts, ok, error`; jedna linia na źródło i pomiar |
 

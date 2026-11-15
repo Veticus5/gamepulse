@@ -1,7 +1,7 @@
 name: Player counts
 
-# Steam keeps no history of player counts, so they are collected here around
-# the clock and stored on the `data` branch. Everything else (news, reviews,
+# Steam keeps no history of player counts or store prices, so they are
+# collected here around the clock and stored on the `data` branch. Everything else (news, reviews,
 # analysis) can be fetched after the fact and stays on the local machine.
 on:
   schedule:

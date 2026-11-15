@@ -261,6 +261,9 @@ class Store:
                 return {"id": evidence_id, "kind": kind, "text": item.get("excerpt"), "voted_up": item.get("voted_up"),
                         "language": item.get("language"), "playtime_hours": item.get("playtime_hours"),
                         "published": item.get("published")}
+            if kind == "discount":
+                return {"id": evidence_id, "kind": kind, "percent": item.get("percent"),
+                        "published": item.get("published"), "until": item.get("until")}
             return {"id": evidence_id, "kind": kind, "gid": item.get("gid"), "title": item.get("title")}
 
         kinds = [e.get("kind", "news") for e in cited.values()]

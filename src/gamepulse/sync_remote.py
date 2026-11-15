@@ -14,7 +14,7 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-KINDS = ("ccu", "fivem")
+KINDS = ("ccu", "fivem", "prices")
 PREFIX = "gh-"
 
 

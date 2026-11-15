@@ -241,6 +241,43 @@ def test_episode_reviews_are_read_from_disk_for_its_days_only(tmp_path):
     assert explain.load_episode_reviews(tmp_path, {**episode(), "appid": 570}) == []
 
 
+def price(day, percent, appid=730):
+    return {"ts": f"{day}T12:00:00Z", "appid": appid, "priced": True, "discount_percent": percent}
+
+
+def test_discounts_are_read_as_runs_of_days(tmp_path):
+    append_jsonl(tmp_path / "raw" / "prices" / "2026-11-01.jsonl", [price("2026-11-01", 0), price("2026-11-01", 50, appid=570)])
+    append_jsonl(tmp_path / "raw" / "prices" / "gh-2026-11-05.jsonl", [price("2026-11-05", 30), price("2026-11-05", 40)])
+    append_jsonl(tmp_path / "raw" / "prices" / "2026-11-06.jsonl", [price("2026-11-06", 40), price("2026-11-08", 10)])
+    first, daily = explain.load_discounts(tmp_path, 730)
+    assert first == date(2026, 11, 1)
+    assert daily == {date(2026, 11, 5): 40, date(2026, 11, 6): 40, date(2026, 11, 8): 10}
+    found = explain.candidate_discounts(episode(), daily)  # the episode covers 6 and 7 November
+    assert [(d["id"], d["published"].isoformat(), d["until"], d["percent"], d["timing"]) for d in found] == [
+        ("D1", "2026-11-05", "2026-11-06", 40, "before"),
+    ]
+    assert explain.load_discounts(tmp_path, 999) == (None, {})
+
+
+def test_discount_is_evidence_the_model_can_cite(tmp_path):
+    prices = (date(2026, 10, 1), {date(2026, 11, 6): 40})
+    p = explain.build_pack(GAME, episode(), parts(), NEWS, EVENTS, None, prices)
+    text = explain.render_pack(p)
+    assert "[D1] discount of 40% from 2026-11-06 to 2026-11-06 (started on the episode's first day)" in text
+    answer = {**GOOD, "hypotheses": [{"claim": "Przecena o 40% (D1) przyciągnęła nowych graczy.", "evidence": ["D1"], "confidence": "medium"}]}
+    result = explain.validate(json.dumps(answer), p)
+    assert (result["verdict"], result["hypotheses"][0]["explains"], result["dropped"]) == ("likely", "start", [])
+
+
+def test_missing_price_data_is_not_reported_as_no_discount():
+    no_data = explain.render_pack(pack())
+    assert "STORE PRICE: not recorded for this period" in no_data
+    covered = explain.build_pack(GAME, episode(), parts(), NEWS, EVENTS, None, (date(2026, 10, 1), {}))
+    assert "STORE PRICE: no discount around the episode." in explain.render_pack(covered)
+    late = explain.build_pack(GAME, episode(), parts(), NEWS, EVENTS, None, (date(2026, 11, 7), {}))
+    assert "not recorded for this period" in explain.render_pack(late)
+
+
 def ollama(answer=GOOD, status=200, calls=None):
     def handler(request):
         if calls is not None:

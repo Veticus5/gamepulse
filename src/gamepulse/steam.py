@@ -136,3 +136,28 @@ def fetch_reviews_page(client: httpx.Client, appid: int, cursor: str = "*") -> t
     if not reviews or not isinstance(following, str) or following == cursor:
         following = None
     return reviews, following
+
+
+def fetch_prices(client: httpx.Client, appids: list[int]) -> dict[int, dict | None]:
+    """Current US store price of each game in one request.
+
+    The value is Steam's ``price_overview`` (amounts in cents, discount in
+    percent) or None for a game without a price, such as a free one.
+    A store endpoint, not part of the official Web API.
+    """
+    body = _get_json(
+        client,
+        f"{STORE_BASE}/api/appdetails",
+        {"appids": ",".join(str(a) for a in appids), "cc": "US", "filters": "price_overview"},
+    )
+    prices: dict[int, dict | None] = {}
+    for appid in appids:
+        entry = body.get(str(appid))
+        if not isinstance(entry, dict) or entry.get("success") is not True:
+            continue  # no answer for this game; it gets no row rather than a wrong one
+        data = entry.get("data")
+        overview = data.get("price_overview") if isinstance(data, dict) else None
+        prices[appid] = overview if isinstance(overview, dict) else None
+    if not prices:
+        raise SteamError("no prices in the store response")
+    return prices
