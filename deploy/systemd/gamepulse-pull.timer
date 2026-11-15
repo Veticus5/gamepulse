@@ -4,7 +4,7 @@ Description=GamePulse: copy player counts collected by GitHub Actions
 [Timer]
 # Shortly after login, then a few minutes after each scheduled collection.
 OnStartupSec=1min
-OnCalendar=*:15,45
+OnCalendar=*:20,50
 RandomizedDelaySec=30
 
 [Install]

@@ -6,7 +6,7 @@ name: Player counts
 on:
   schedule:
     # Twice an hour, off the full hour, when GitHub's scheduler is busiest.
-    - cron: "7,37 * * * *"
+    - cron: "11,41 * * * *"
   workflow_dispatch:
 
 permissions:

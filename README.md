@@ -81,7 +81,7 @@ Dlatego liczbę graczy (Steam i FiveM) zbiera workflow
 `.github/workflows/player-counts.yml`, niezależnie od tego, czy komputer jest
 włączony. Newsy i recenzje da się pobrać wstecz, więc zostają lokalnie.
 
-- Workflow rusza dwa razy na godzinę (7 i 37 minut po pełnej godzinie) i dopisuje
+- Workflow rusza dwa razy na godzinę (11 i 41 minut po pełnej godzinie) i dopisuje
   pomiary do gałęzi `data` w plikach `raw/ccu/`, `raw/fivem/` i `raw/prices/`.
   Ceny (sklep USA, jedno zapytanie na wszystkie gry) też nie mają historii w Steamie.
 - GitHub nie gwarantuje punktualności: przebieg bywa opóźniony o kilka–kilkanaście
