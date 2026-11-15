@@ -2,8 +2,11 @@
 Description=GamePulse: Steam user reviews (text, language, playtime)
 
 [Timer]
-OnCalendar=*-*-* 12:10:00
-RandomizedDelaySec=30
+# Once a day. Persistent makes a run missed while logged out happen right
+# after the next login, so in practice: at the first login of the day, or at
+# midnight when the session stays open.
+OnCalendar=daily
+RandomizedDelaySec=2min
 Persistent=true
 
 [Install]

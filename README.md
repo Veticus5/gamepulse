@@ -88,8 +88,8 @@ Pierwsze uruchomienie sięga 30 dni (`--days`), kolejne dociągają tylko nowe.
   Oficjalne `IUserReviewsService/GetAppReviews` nie zwraca recenzji w kolejności
   od najnowszych (sprawdzone 15 listopada 2026 r.), więc nie da się nim iść wstecz.
 
-Plik timera `deploy/systemd/gamepulse-review-texts.timer` (codziennie o 12:10)
-jest w repozytorium, ale nie należy do zestawu włączanego poleceniami poniżej.
+Timer `gamepulse-review-texts.timer` uruchamia pobieranie raz dziennie: przy
+pierwszym logowaniu danego dnia albo o północy, gdy sesja jest otwarta.
 
 ## Anomalie w recenzjach
 
@@ -231,7 +231,7 @@ systemctl --user daemon-reload
 ```
 
 ```bash
-systemctl --user enable --now gamepulse-ccu.timer gamepulse-fivem.timer gamepulse-news.timer gamepulse-reviews.timer gamepulse-model.timer
+systemctl --user enable --now gamepulse-ccu.timer gamepulse-fivem.timer gamepulse-news.timer gamepulse-reviews.timer gamepulse-model.timer gamepulse-review-texts.timer
 ```
 
 Podgląd:
@@ -244,7 +244,7 @@ journalctl --user -u gamepulse-ccu.service -n 20
 Cofnięcie:
 
 ```bash
-systemctl --user disable --now gamepulse-ccu.timer gamepulse-fivem.timer gamepulse-news.timer gamepulse-reviews.timer gamepulse-model.timer
+systemctl --user disable --now gamepulse-ccu.timer gamepulse-fivem.timer gamepulse-news.timer gamepulse-reviews.timer gamepulse-model.timer gamepulse-review-texts.timer
 rm ~/.config/systemd/user/gamepulse-*
 systemctl --user daemon-reload
 ```
