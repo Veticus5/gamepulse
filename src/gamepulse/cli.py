@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import IO
 
-from gamepulse import classify, evaluate, explain, model, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
+from gamepulse import classify, evaluate, explain, model, collect_review_texts, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
 from gamepulse.config import load_games
 from gamepulse.steam import make_client
 
@@ -27,6 +27,9 @@ def _parser() -> argparse.ArgumentParser:
         help="walk the whole history (first run, new games, or after an interrupted run)",
     )
     sub.add_parser("reviews", parents=[steam], help="Steam review histogram snapshot")
+    texts = sub.add_parser("review-texts", parents=[steam], help="Steam user reviews: text, language, playtime")
+    texts.add_argument("--days", type=int, default=30, help="how far back the history should reach (default 30)")
+    texts.add_argument("--max-pages", type=int, default=300, help="pages of 100 reviews per game and run (default 300)")
     sub.add_parser("meta", parents=[steam], help="Steam store metadata snapshot")
     cls = sub.add_parser("classify", parents=[steam], help="label official news with the local model")
     cls.add_argument("--since-days", type=int, default=90, help="only news this recent (default 90)")
@@ -140,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
                 client, games, args.data_dir,
                 since_days=args.since_days, limit=args.limit, model=args.model,
             )
+        elif args.command == "review-texts":
+            succeeded = collect_review_texts.run(client, games, args.data_dir, days=args.days, max_pages=args.max_pages)
         elif args.command == "explain":
             explain.run(client, games, args.data_dir, since_days=args.since_days, limit=args.limit, model=args.model)
             succeeded = 1  # nothing new to explain is not a failure

@@ -12,6 +12,7 @@ uv run gamepulse ccu            # bieżąca liczba graczy każdej gry (Steam)
 uv run gamepulse news           # nowe newsy (Steam)
 uv run gamepulse news --full    # cała historia newsów
 uv run gamepulse reviews        # histogram recenzji (Steam)
+uv run gamepulse review-texts   # treść recenzji z językiem i czasem gry (Steam)
 uv run gamepulse fivem          # łączna liczba graczy FiveM (poza Steamem)
 uv run gamepulse meta           # metadane gier ze sklepu Steam (studio, premiera, gatunki)
 uv run gamepulse model          # modele dbt i wykrywanie anomalii w recenzjach
@@ -69,6 +70,26 @@ rzeczy), datę wejścia w życie, jednozdaniowe streszczenie, ważność i pewno
 3. `uv run gamepulse eval-classifier` porównuje model z etykietami: trafność,
    precyzja i czułość per typ, zgodność tagów dodatkowych oraz lista rozbieżności. Uruchamiaj po każdej
    zmianie promptu lub modelu.
+
+## Treść recenzji
+
+`uv run gamepulse review-texts` pobiera recenzje od najnowszych wstecz.
+Pierwsze uruchomienie sięga 30 dni (`--days`), kolejne dociągają tylko nowe.
+
+- Limit to 300 stron po 100 recenzji na grę i uruchomienie (`--max-pages`), z
+  sekundą przerwy między stronami. Czego nie zdąży, dokończy następne
+  uruchomienie; pozycja jest w `data/state/review_texts/`.
+- Przerwane pobieranie (limit, błąd Steama, wyłączenie komputera) jest
+  wznawiane bez dziur i bez duplikatów.
+- Nie są zapisywane: identyfikator Steam, nazwa, profil, awatar ani lokalizacja
+  recenzenta. Zostają czas gry i liczba recenzji autora.
+- Recenzja edytowana po pobraniu nie jest pobierana ponownie.
+- Źródło to `store.steampowered.com/ajaxappreviews/<appid>`, poza oficjalnym API.
+  Oficjalne `IUserReviewsService/GetAppReviews` nie zwraca recenzji w kolejności
+  od najnowszych (sprawdzone 15 listopada 2026 r.), więc nie da się nim iść wstecz.
+
+Plik timera `deploy/systemd/gamepulse-review-texts.timer` (codziennie o 12:10)
+jest w repozytorium, ale nie należy do zestawu włączanego poleceniami poniżej.
 
 ## Anomalie w recenzjach
 
@@ -152,6 +173,7 @@ niezależnie od tego i jako jedyne znajdzie wpis dodany ze starą datą.
 | `data/raw/ccu/RRRR-MM-DD.jsonl` | `ts, appid, player_count, ok, error`; jedna linia na grę i pomiar |
 | `data/raw/news/<appid>.jsonl` | surowy wpis Steam plus `fetched_at`; kolektor nie zapisuje drugi raz tego samego `gid` |
 | `data/raw/review_histogram/<appid>.jsonl` | `fetched_at, appid, results`; pełna migawka na każde pobranie |
+| `data/raw/reviews/<appid>.jsonl` | jedna recenzja na linię: treść, ocena, język, czas gry, sposób zakupu, daty; bez danych recenzenta |
 | `data/raw/appdetails/<appid>.jsonl` | `fetched_at, appid, details`; wybrane pola ze sklepu Steam |
 | `data/raw/fivem/RRRR-MM-DD.jsonl` | `ts, url, counts, ok, error`; jedna linia na źródło i pomiar |
 

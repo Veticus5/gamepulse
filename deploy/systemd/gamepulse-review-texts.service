@@ -1,0 +1,15 @@
+[Unit]
+Description=GamePulse: Steam user reviews (text, language, playtime)
+StartLimitIntervalSec=30min
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/gamepulse
+# The project's own environment, created once with `uv sync`.
+ExecStart=%h/projects/gamepulse/.venv/bin/gamepulse review-texts
+# A first run, or one after a long break, walks thousands of pages.
+TimeoutStartSec=4h
+# A catch-up run can start before the network is up; try again shortly.
+Restart=on-failure
+RestartSec=2min

@@ -110,3 +110,29 @@ def fetch_app_details(client: httpx.Client, appid: int) -> dict:
     if not isinstance(entry, dict) or entry.get("success") is not True or not isinstance(data, dict):
         raise SteamError(f"no store details for appid {appid}")
     return data
+
+
+def fetch_reviews_page(client: httpx.Client, appid: int, cursor: str = "*") -> tuple[list[dict], str | None]:
+    """One page of up to 100 user reviews in every language, newest first,
+    and the cursor of the next page (None at the end of the history).
+
+    A store endpoint, not part of the official Web API. The official
+    IUserReviewsService/GetAppReviews ignores the "recent" order (checked
+    2026-11-15), so it cannot be walked backwards in time.
+    """
+    body = _get_json(
+        client,
+        f"{STORE_BASE}/ajaxappreviews/{appid}",
+        {
+            "json": 1, "filter": "recent", "language": "all", "purchase_type": "all", "review_type": "all",
+            "num_per_page": 100, "filter_offtopic_activity": 0, "cursor": cursor,
+        },
+    )
+    reviews = body.get("reviews")
+    if body.get("success") != 1 or not isinstance(reviews, list):
+        raise SteamError(f"no reviews for appid {appid}")
+    reviews = [r for r in reviews if isinstance(r, dict)]
+    following = body.get("cursor")
+    if not reviews or not isinstance(following, str) or following == cursor:
+        following = None
+    return reviews, following

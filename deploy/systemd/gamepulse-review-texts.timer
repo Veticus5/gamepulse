@@ -1,0 +1,10 @@
+[Unit]
+Description=GamePulse: Steam user reviews (text, language, playtime)
+
+[Timer]
+OnCalendar=*-*-* 12:10:00
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
