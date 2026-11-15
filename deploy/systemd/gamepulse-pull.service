@@ -1,0 +1,11 @@
+[Unit]
+Description=GamePulse: copy player counts collected by GitHub Actions
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/gamepulse
+# The project's own environment, created once with `uv sync`.
+ExecStart=%h/projects/gamepulse/.venv/bin/gamepulse pull-remote
+# A timer has no terminal to ask for a password on; use the key directly.
+Environment="GIT_SSH_COMMAND=ssh -i %h/.ssh/id_ed25519_private -o IdentitiesOnly=yes -o BatchMode=yes"
+TimeoutStartSec=5min

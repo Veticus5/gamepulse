@@ -15,6 +15,7 @@ uv run gamepulse reviews        # histogram recenzji (Steam)
 uv run gamepulse review-texts   # treść recenzji z językiem i czasem gry (Steam)
 uv run gamepulse fivem          # łączna liczba graczy FiveM (poza Steamem)
 uv run gamepulse meta           # metadane gier ze sklepu Steam (studio, premiera, gatunki)
+uv run gamepulse pull-remote    # pomiary liczby graczy zebrane przez GitHub Actions
 uv run gamepulse model          # modele dbt i wykrywanie anomalii w recenzjach
 uv run gamepulse explain        # agent: możliwe przyczyny epizodów w recenzjach (lokalny model)
 uv run gamepulse web            # interfejs pod http://127.0.0.1:8765
@@ -70,6 +71,28 @@ rzeczy), datę wejścia w życie, jednozdaniowe streszczenie, ważność i pewno
 3. `uv run gamepulse eval-classifier` porównuje model z etykietami: trafność,
    precyzja i czułość per typ, zgodność tagów dodatkowych oraz lista rozbieżności. Uruchamiaj po każdej
    zmianie promptu lub modelu.
+
+## Liczba graczy całą dobę (GitHub Actions)
+
+Steam nie udostępnia historii liczby graczy, więc pomiar, którego nie było, przepada.
+Dlatego liczbę graczy (Steam i FiveM) zbiera workflow
+`.github/workflows/player-counts.yml`, niezależnie od tego, czy komputer jest
+włączony. Newsy i recenzje da się pobrać wstecz, więc zostają lokalnie.
+
+- Workflow rusza dwa razy na godzinę (7 i 37 minut po pełnej godzinie) i dopisuje
+  pomiary do gałęzi `data` w plikach `raw/ccu/` i `raw/fivem/`.
+- GitHub nie gwarantuje punktualności: przebieg bywa opóźniony o kilka–kilkanaście
+  minut, a czasem wypada. Każdy pomiar ma zapisany rzeczywisty czas.
+- Przebieg nie instaluje projektu, tylko `httpx`, żeby zmieścić się w minucie.
+  W prywatnym repozytorium darmowy plan daje 2000 minut miesięcznie, a każdy
+  przebieg liczy się jako co najmniej jedna minuta (około 1440 minut miesięcznie).
+- Harmonogram działa tylko z domyślnej gałęzi repozytorium (`main`). GitHub wyłącza
+  zaplanowane workflow po 60 dniach bez aktywności w repozytorium.
+- `uv run gamepulse pull-remote` pobiera gałąź `data` i kopiuje pliki do
+  `data/raw/ccu/gh-*.jsonl` i `data/raw/fivem/gh-*.jsonl`. Robi to timer
+  `gamepulse-pull.timer`: minutę po zalogowaniu, potem co 30 minut.
+- Po przeniesieniu lokalne timery `gamepulse-ccu.timer` i `gamepulse-fivem.timer`
+  są wyłączone, żeby ten sam pomiar nie był robiony dwa razy.
 
 ## Treść recenzji
 

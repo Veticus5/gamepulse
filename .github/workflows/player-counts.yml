@@ -1,0 +1,53 @@
+name: Player counts
+
+# Steam keeps no history of player counts, so they are collected here around
+# the clock and stored on the `data` branch. Everything else (news, reviews,
+# analysis) can be fetched after the fact and stays on the local machine.
+on:
+  schedule:
+    # Twice an hour, off the full hour, when GitHub's scheduler is busiest.
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: player-counts
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # Measurements live on their own branch; create it on the first run.
+      - name: Check out the data branch
+        run: |
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch --depth 1 origin data
+            git worktree add collected FETCH_HEAD
+            git -C collected switch -C data
+          else
+            git worktree add --orphan -b data collected
+          fi
+
+      # No project install: the collector needs httpx only, and every run
+      # is billed as at least one full minute, so it has to stay short.
+      - name: Collect
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "httpx>=0.28"
+          PYTHONPATH=src "$RUNNER_TEMP/venv/bin/python" -m gamepulse.remote --games games.toml --data-dir collected
+
+      - name: Store
+        run: |
+          cd collected
+          git add raw
+          git -c user.name="gamepulse-bot" -c user.email="gamepulse-bot@users.noreply.github.com" \
+            commit --quiet -m "data: player counts $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push --quiet origin data

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import IO
 
-from gamepulse import classify, evaluate, explain, model, collect_review_texts, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
+from gamepulse import classify, evaluate, explain, model, sync_remote, collect_review_texts, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
 from gamepulse.config import load_games
 from gamepulse.steam import make_client
 
@@ -51,6 +51,8 @@ def _parser() -> argparse.ArgumentParser:
     web.add_argument("--host", default="127.0.0.1", help="address to listen on")
     web.add_argument("--port", type=int, default=8765)
     web.add_argument("--eval-dir", type=Path, default=Path("eval"), help="where the sample and labels live")
+    pull = sub.add_parser("pull-remote", parents=[data], help="copy player counts collected by GitHub Actions")
+    pull.add_argument("--repo", type=Path, default=Path("."), help="the git repository whose data branch is read")
     sub.add_parser("model", parents=[data], help="build the dbt tables and find review anomalies")
     sub.add_parser("fivem", parents=[data], help="FiveM total player counts (not from Steam)")
     return parser
@@ -74,6 +76,14 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # one line per request otherwise
     games = []
+    if args.command == "pull-remote":
+        try:
+            changed = sync_remote.pull(args.repo, args.data_dir)
+        except sync_remote.RemoteError as exc:
+            print(f"gamepulse: {exc}", file=sys.stderr)
+            return 1
+        print(f"Zaktualizowane pliki z GitHuba: {changed}")
+        return 0
     if args.command == "model":
         lock = _acquire_lock(args.data_dir, "model")
         if lock is None:
