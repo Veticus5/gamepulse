@@ -247,6 +247,7 @@ table.parts th { color: var(--muted); font-weight: normal; border-top: 0; }
 .events .sub { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 13px; }
 .drawer .link { margin-bottom: 12px; }
 .drawer .cites .link { margin-bottom: 0; text-align: left; }
+.quote { margin: 2px 0; padding: 4px 10px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 2px; font-size: 13px; overflow-wrap: anywhere; }
 
 .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
 .panel-head .muted .up, .panel-head .muted .down { margin-left: 2px; }

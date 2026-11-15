@@ -253,18 +253,29 @@ class Store:
         if not full:
             return brief
         cited = {e["id"]: e for e in row.get("evidence") or []}
+
+        def shown(evidence_id: str) -> dict:
+            item = cited[evidence_id]
+            kind = item.get("kind", "news")  # explanations made before press and reviews carry no kind
+            if kind == "review":
+                return {"id": evidence_id, "kind": kind, "text": item.get("excerpt"), "voted_up": item.get("voted_up"),
+                        "language": item.get("language"), "playtime_hours": item.get("playtime_hours"),
+                        "published": item.get("published")}
+            return {"id": evidence_id, "kind": kind, "gid": item.get("gid"), "title": item.get("title")}
+
+        kinds = [e.get("kind", "news") for e in cited.values()]
         return {
             **brief,
             "hypotheses": [
-                {**h, "evidence": [
-                    {"id": i, "gid": cited[i]["gid"], "title": cited[i].get("title")} for i in h["evidence"] if i in cited
-                ]}
+                {**h, "evidence": [shown(i) for i in h["evidence"] if i in cited]}
                 for h in row.get("hypotheses") or []
             ],
             "missing": row.get("missing") or "",
             "model": row.get("model"),
             "explained_at": row.get("explained_at"),
             "evidence_count": len(cited),
+            "shown": {kind: kinds.count(kind) for kind in ("news", "press", "review")},
+            "reviews_collected": row.get("reviews_collected") or 0,
             "dropped": len(row.get("dropped") or []),
         }
 

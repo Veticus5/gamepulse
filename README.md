@@ -153,26 +153,36 @@ nie wyjaśnienie przyczyn.
 
 `uv run gamepulse explain` prosi lokalny model (Ollama, domyślnie `qwen3.8:27b`)
 o możliwe przyczyny epizodów zakończonych w ostatnich 90 dniach
-(`--since-days`, `--limit`, `--model`). Jedno wywołanie na epizod, około 4 sekund,
+(`--since-days`, `--limit`, `--model`). Jedno wywołanie na epizod, około 7 sekund,
 bez narzędzi. Epizod jest analizowany ponownie tylko wtedy, gdy zmieniły się jego
 liczby, newsy wokół niego, prompt albo model.
 
-1. Kod składa paczkę dowodów: liczby epizodu i do 12 oficjalnych newsów z okna
-   wokół niego, każdy z identyfikatorem (N1, N2, ...).
+1. Kod składa paczkę dowodów z identyfikatorami:
+   - **N**: do 12 oficjalnych newsów z okna wokół epizodu;
+   - **P**: do 6 artykułów prasowych, które Steam podaje dla gry (PC Gamer, PCGamesN,
+     Rock Paper Shotgun i inne), najbliższych początkowi epizodu;
+   - **R**: próbka 30 recenzji graczy napisanych w trakcie epizodu, jeśli są zebrane.
+     Większość z tej strony, po której jest epizod; połowa to recenzje najczęściej
+     oznaczane jako pomocne, połowa losowa (zawsze ta sama). Recenzje krótsze niż
+     40 znaków są pomijane.
 2. Model zwraca werdykt (`likely`, `possible`, `unknown`), podsumowanie i do 3 hipotez.
-   Każda hipoteza musi wskazać identyfikatory newsów, na których się opiera.
+   Każda hipoteza musi wskazać identyfikatory dowodów, na których się opiera.
 3. Kod sprawdza odpowiedź:
    - hipoteza bez istniejącego dowodu jest odrzucana;
    - tekst z liczbą, której nie ma w paczce, jest odrzucany (model nie liczy);
-   - hipoteza oparta tylko na newsach opublikowanych po pierwszym dniu epizodu
+   - hipoteza oparta tylko na wpisach opublikowanych po pierwszym dniu epizodu
      dostaje oznaczenie „tłumaczy ciąg dalszy", a bez hipotezy o początku werdykt
      to najwyżej `possible`;
+   - gdy model dostał co najmniej 10 recenzji, werdykt `likely` wymaga hipotezy
+     wskazującej co najmniej 2 recenzje; inaczej jest obniżany do `possible`;
+   - odpowiedź po angielsku jest odrzucana w całości;
    - bez żadnej hipotezy werdykt to `unknown`.
-4. Gdy w oknie nie ma newsów, odpowiada kod (`unknown`), a model nie jest pytany.
+4. Gdy w oknie nie ma żadnych dowodów, odpowiada kod (`unknown`), a model nie jest pytany.
 
-Ograniczenia: model nie widzi treści recenzji, więc hipotezy opierają się na
-zbieżności w czasie i treści newsa, nie na tym, co pisali gracze. Trafności
-wyjaśnień nikt jeszcze nie zmierzył; nie ma do tego ręcznie oznaczonej próbki.
+Ograniczenia: recenzje są zebrane tylko dla ostatnich tygodni, więc starsze epizody
+opierają się na zbieżności w czasie i treści wpisów. Kod sprawdza, że wskazana
+recenzja istnieje, ale nie sprawdza, czy naprawdę mówi to, co twierdzi model.
+Trafności wyjaśnień nikt jeszcze nie zmierzył; nie ma do tego ręcznie oznaczonej próbki.
 
 Wyniki: `data/derived/explanations/<appid>.jsonl` (ostatnia linia dla epizodu wygrywa,
 razem z odrzuconymi twierdzeniami w polu `dropped`). Każde wywołanie modelu jest

@@ -590,6 +590,11 @@ const VERDICT = {
   possible: ["Możliwa przyczyna", ""],
   unknown: ["Przyczyna nieznana", "muted"],
 };
+const EXPLAINS_LABEL = {
+  start: "może tłumaczyć początek epizodu",
+  continuation: "może tłumaczyć tylko ciąg dalszy, nie początek",
+  reviews: "oparte na tym, co pisali gracze",
+};
 const CONFIDENCE_LABEL = { high: "pewność wysoka", medium: "pewność średnia", low: "pewność niska" };
 
 function verdictLine(explanation) {
@@ -605,6 +610,8 @@ function explanationBlock(appid, e, explanation, reopen) {
       el("p", { class: "muted" }, "Agent jeszcze nie analizował tego epizodu. Uruchom: gamepulse explain")];
   }
   const [label, tone] = VERDICT[explanation.verdict] || VERDICT.unknown;
+  // Explanations made before press and reviews were added carry no breakdown.
+  const shown = explanation.shown || { news: explanation.evidence_count, press: 0, review: 0 };
   return [
     el("h4", {}, "Wyjaśnienie agenta"),
     el("div", { class: "labelbox" },
@@ -614,13 +621,19 @@ function explanationBlock(appid, e, explanation, reopen) {
         el("li", {},
           el("div", {}, h.claim),
           el("div", { class: "muted fine" },
-            `${CONFIDENCE_LABEL[h.confidence] || ""} · ${h.explains === "start" ? "może tłumaczyć początek epizodu" : "może tłumaczyć tylko ciąg dalszy, nie początek"}`),
-          el("div", { class: "cites" }, h.evidence.map((c) =>
-            el("button", { class: "link", onclick: () => openNews(appid, c.gid, reopen) }, `${c.id}: ${c.title || "(bez tytułu)"}`)))))) : null,
+            `${CONFIDENCE_LABEL[h.confidence] || ""} · ${EXPLAINS_LABEL[h.explains] || ""}`),
+          el("div", { class: "cites" }, h.evidence.map((c) => c.kind === "review"
+            ? el("blockquote", { class: "quote" },
+                el("span", { class: "muted fine" }, `${c.id} · recenzja ${c.voted_up ? "pozytywna" : "negatywna"} · ${nf.format(c.playtime_hours || 0)} godz. gry · ${c.language || ""}`),
+                el("span", {}, c.text || ""))
+            : el("button", { class: "link", onclick: () => openNews(appid, c.gid, reopen) },
+                `${c.id}${c.kind === "press" ? " (prasa)" : ""}: ${c.title || "(bez tytułu)"}`)))))) : null,
       explanation.missing ? el("div", { class: "muted" }, `Czego brakuje do pewności: ${explanation.missing}`) : null,
       el("div", { class: "muted fine" }, explanation.source === "code"
         ? "Odpowiedź z kodu: bez newsów w oknie model nie był pytany."
-        : `Lokalny model (${explanation.model}) dostał liczby epizodu i ${explanation.evidence_count} oficjalnych newsów, bez treści recenzji. Nie wie, co pisali gracze, więc to hipotezy oparte na zbieżności w czasie. Kod odrzucił twierdzenia bez dowodu lub z liczbami spoza danych${explanation.dropped ? ` (${explanation.dropped})` : ""}.`)),
+        : `Lokalny model (${explanation.model}) dostał liczby epizodu, ${shown.news} oficjalnych newsów i ${shown.press} artykułów prasowych. ${shown.review
+            ? `Przeczytał też próbkę ${shown.review} z ${nf.format(explanation.reviews_collected)} zebranych recenzji z tego czasu.`
+            : "Nie miał treści recenzji z tego czasu, więc nie wie, co pisali gracze; to hipotezy oparte na zbieżności w czasie."} Kod odrzucił twierdzenia bez dowodu lub z liczbami spoza danych${explanation.dropped ? ` (${explanation.dropped})` : ""}.`)),
   ];
 }
 

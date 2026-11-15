@@ -330,8 +330,13 @@ def test_episode_carries_the_agents_explanation(data_dir):
     ])
     record = {
         "episode_id": "e1", "appid": 730, "verdict": "possible", "summary": "Zbieżne z łatką.", "source": "model",
-        "hypotheses": [{"claim": "Łatka mogła pomóc.", "evidence": ["N1", "N5"], "confidence": "low", "explains": "start"}],
-        "evidence": [{"id": "N1", "gid": "a", "title": "Patch", "published": "2026-11-12", "timing": "before"}],
+        "hypotheses": [{"claim": "Łatka mogła pomóc.", "evidence": ["N1", "N5", "R1"], "confidence": "low", "explains": "start"}],
+        "evidence": [
+            {"id": "N1", "gid": "a", "title": "Patch", "published": "2026-11-12", "timing": "before"},
+            {"id": "R1", "kind": "review", "published": "2026-11-14", "voted_up": True, "language": "polish",
+             "playtime_hours": 12, "excerpt": "Wreszcie działa."},
+        ],
+        "reviews_collected": 40,
         "missing": "Treść recenzji.", "model": "m", "explained_at": "2026-11-14T12:00:00Z", "dropped": [{}],
     }
     append_jsonl(data_dir / "derived" / "explanations" / "730.jsonl", [{**record, "verdict": "unknown"}, record])
@@ -341,7 +346,12 @@ def test_episode_carries_the_agents_explanation(data_dir):
     full = store.episode(730, "e1")["explanation"]
     assert full["hypotheses"] == [{
         "claim": "Łatka mogła pomóc.", "confidence": "low", "explains": "start",
-        "evidence": [{"id": "N1", "gid": "a", "title": "Patch"}],  # an id the record does not hold is left out
+        "evidence": [  # an id the record does not hold is left out
+            {"id": "N1", "kind": "news", "gid": "a", "title": "Patch"},
+            {"id": "R1", "kind": "review", "text": "Wreszcie działa.", "voted_up": True, "language": "polish",
+             "playtime_hours": 12, "published": "2026-11-14"},
+        ],
     }]
-    assert (full["missing"], full["model"], full["dropped"], full["evidence_count"]) == ("Treść recenzji.", "m", 1, 1)
+    assert (full["missing"], full["model"], full["dropped"], full["evidence_count"]) == ("Treść recenzji.", "m", 1, 2)
+    assert full["shown"] == {"news": 1, "press": 0, "review": 1} and full["reviews_collected"] == 40
     assert store.episode(730, "e2")["explanation"] is None
