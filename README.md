@@ -116,6 +116,20 @@ Pierwsze uruchomienie sięga 30 dni (`--days`), kolejne dociągają tylko nowe.
 Timer `gamepulse-review-texts.timer` uruchamia pobieranie raz dziennie: przy
 pierwszym logowaniu danego dnia albo o północy, gdy sesja jest otwarta.
 
+## Kto wystawia oceny
+
+Na stronie gry panel „Kto wystawia oceny" pokazuje odsetek pozytywnych recenzji
+w podziale na czas gry w chwili recenzji, język recenzji i sposób zdobycia gry,
+dla ostatnich 7 lub 30 dni albo wszystkich zebranych recenzji. W panelu epizodu
+tabela „Które grupy graczy zmieniły zdanie" porównuje te same grupy w epizodzie
+i w 14 dniach przed nim (albo w okresie tak długim jak epizod, jeśli jest dłuższy).
+
+- Liczy kod z zebranych recenzji (`data/raw/reviews/`), bez modelu.
+- Grupa z mniej niż 30 recenzjami nie dostaje odsetka.
+- Dla gier darmowych podział według sposobu zdobycia jest ukryty.
+- Język recenzji to nie kraj gracza. Gracze z długim stażem to ci, którzy nie
+  odeszli, więc ich oceny są z natury wyższe.
+
 ## Anomalie w recenzjach
 
 `uv run gamepulse model` uruchamia modele dbt (`src/gamepulse/warehouse/`) na

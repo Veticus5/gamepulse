@@ -667,9 +667,14 @@ async function openEpisode(appid, e) {
   ];
   openDrawer(...head, el("p", { class: "muted" }, "Wczytywanie newsów…"));
   try {
-    const detail = await api(`/api/games/${appid}/episodes/${encodeURIComponent(e.id)}`);
+    const [detail, shift] = await Promise.all([
+      api(`/api/games/${appid}/episodes/${encodeURIComponent(e.id)}`),
+      episodeShift(appid, e).catch(() => null),
+    ]);
     openDrawer(...head,
       ...explanationBlock(appid, e, detail.explanation, reopen),
+      shift ? el("h4", {}, "Które grupy graczy zmieniły zdanie") : null,
+      shift,
       el("h4", {}, "Oficjalne newsy w pobliżu"),
       el("div", { class: "meta" }, `Od ${dateFmt.format(detail.news_from_ms)} do końca epizodu: ${detail.news_total}`),
       detail.news.length
@@ -707,6 +712,115 @@ function episodePanel(appid, episodes) {
     episodes.length ? grid : el("p", { class: "muted" }, "Nie wykryto nietypowych epizodów albo analiza jeszcze nie była uruchomiona."),
     el("div", { class: "chart-note" },
       "Epizod to jeden lub kilka kolejnych okresów, w których odsetek pozytywnych recenzji wyraźnie odbiega od zwykłego dla tej gry albo recenzji jest co najmniej trzy razy więcej niż zwykle. Epizody wykrywa kod, bez udziału modelu. Przyczynę proponuje lokalny model na podstawie oficjalnych newsów; „przyczyna nieznana” to pełnoprawna odpowiedź. Kliknij epizod, żeby zobaczyć przebieg, hipotezy z dowodami i newsy z tego czasu."));
+}
+
+// ---------------------------------------------------------------- who reviews
+
+const SEGMENT_MIN = 30; // below this a percentage is noise
+const PLAYTIME_LABEL = {
+  under_2h: "poniżej 2 godz.", "2_10h": "2–10 godz.", "10_50h": "10–50 godz.", "50_200h": "50–200 godz.",
+  "200_1000h": "200–1000 godz.", over_1000h: "ponad 1000 godz.", unknown: "nieznany",
+};
+const LANGUAGE_LABEL = {
+  english: "angielski", schinese: "chiński uproszczony", tchinese: "chiński tradycyjny", russian: "rosyjski",
+  polish: "polski", german: "niemiecki", french: "francuski", spanish: "hiszpański", latam: "hiszpański (Am. Łac.)",
+  brazilian: "portugalski (Brazylia)", portuguese: "portugalski", koreana: "koreański", japanese: "japoński",
+  turkish: "turecki", italian: "włoski", thai: "tajski", ukrainian: "ukraiński", czech: "czeski",
+  hungarian: "węgierski", dutch: "niderlandzki", swedish: "szwedzki", vietnamese: "wietnamski",
+  indonesian: "indonezyjski", other: "pozostałe", unknown: "nieznany",
+};
+const PURCHASE_LABEL = { steam: "kupiona na Steamie", key: "klucz lub zakup poza Steamem", free: "otrzymana za darmo" };
+
+function segmentRow(label, group) {
+  const enough = group.n >= SEGMENT_MIN;
+  const share = group.n ? group.positive / group.n : 0;
+  return el("div", { class: "segment" },
+    el("span", { class: "segment-label" }, label),
+    el("span", { class: `segment-bar ${enough ? "" : "thin"}`, title: `${nf.format(group.positive)} pozytywnych, ${nf.format(group.n - group.positive)} negatywnych` },
+      enough ? el("i", { style: `width:${(100 * share).toFixed(1)}%` }) : null),
+    el("span", { class: "segment-value" }, enough ? `${Math.round(100 * share)}%` : "za mało"),
+    el("span", { class: "segment-n muted" }, nf.format(group.n)));
+}
+
+function segmentBlock(title, groups, labels, note) {
+  return el("div", { class: "segment-block" },
+    el("h3", {}, title),
+    groups.length ? groups.map((g) => segmentRow(labels[g.key] || g.key, g)) : el("p", { class: "muted small" }, "Brak danych."),
+    note ? el("p", { class: "muted fine" }, note) : null);
+}
+
+// Who wrote the reviews and how each group voted. Counted by code from collected reviews.
+function segmentsPanel(appid) {
+  const body = el("div", {}, el("p", { class: "muted" }, "Wczytywanie…"));
+  const chips = el("div", { class: "chips" });
+  let days = 30;
+  async function load() {
+    chips.replaceChildren(...[[7, "7 dni"], [30, "30 dni"], [null, "Wszystko zebrane"]].map(([value, label]) =>
+      el("button", { class: `chip ${value === days ? "active" : ""}`, onclick: () => { days = value; load(); } }, label)));
+    try {
+      const query = days ? `?from_ms=${Date.now() - days * 86400000}` : "";
+      const data = await api(`/api/games/${appid}/review-segments${query}`);
+      if (!data.collected) {
+        body.replaceChildren(el("p", { class: "muted" }, "Treść recenzji tej gry nie została jeszcze pobrana."));
+        return;
+      }
+      body.replaceChildren(
+        el("div", { class: "segments" },
+          segmentBlock("Czas gry w chwili recenzji", data.playtime, PLAYTIME_LABEL),
+          segmentBlock("Język recenzji", data.language, LANGUAGE_LABEL),
+          data.is_free
+            ? segmentBlock("Sposób zdobycia gry", [], PURCHASE_LABEL, "Gra jest darmowa, więc ten podział nic nie mówi.")
+            : segmentBlock("Sposób zdobycia gry", data.purchase, PURCHASE_LABEL)),
+        el("div", { class: "chart-note" },
+          `W tym okresie: ${nf.format(data.total)} recenzji, ${data.total ? Math.round((100 * data.positive) / data.total) : 0}% pozytywnych. `,
+          `Zebrane recenzje sięgają od ${dateFmt.format(data.collected.first_ms)} do ${dateFmt.format(data.collected.last_ms)} (${nf.format(data.collected.count)}). `,
+          `Pasek pokazuje odsetek pozytywnych, liczba obok to liczba recenzji w grupie; poniżej ${SEGMENT_MIN} recenzji odsetek nie jest pokazywany. `,
+          "Język recenzji to nie kraj gracza. Gracze z długim stażem to ci, którzy nie odeszli, więc ich oceny są z natury wyższe."));
+    } catch (error) {
+      body.replaceChildren(el("p", { class: "muted" }, "Nie udało się wczytać podziału recenzji."));
+    }
+  }
+  load();
+  return el("div", { class: "panel" },
+    el("div", { class: "panel-head" }, el("h2", {}, "Kto wystawia oceny"), chips),
+    body);
+}
+
+// Which groups voted differently during an episode than just before it.
+async function episodeShift(appid, e) {
+  const span = Math.max(e.end_ms - e.start_ms, 14 * 86400000);
+  const [during, before] = await Promise.all([
+    api(`/api/games/${appid}/review-segments?from_ms=${e.start_ms}&to_ms=${e.end_ms}`),
+    api(`/api/games/${appid}/review-segments?from_ms=${e.start_ms - span}&to_ms=${e.start_ms}`),
+  ]);
+  if (during.total < SEGMENT_MIN) return null;
+  if (before.total < SEGMENT_MIN) {
+    return el("p", { class: "muted fine" }, "Za mało zebranych recenzji sprzed epizodu, żeby porównać grupy graczy.");
+  }
+  const rows = [];
+  for (const [kind, labels] of [["playtime", PLAYTIME_LABEL], ["language", LANGUAGE_LABEL]]) {
+    const earlier = new Map(before[kind].map((g) => [g.key, g]));
+    for (const g of during[kind]) {
+      const b = earlier.get(g.key);
+      if (!b || g.n < SEGMENT_MIN || b.n < SEGMENT_MIN || g.key === "unknown" || g.key === "other") continue;
+      const now = g.positive / g.n;
+      const then = b.positive / b.n;
+      rows.push({ label: `${kind === "playtime" ? "Czas gry" : "Język"}: ${labels[g.key] || g.key}`, now, then, n: g.n, shift: now - then });
+    }
+  }
+  if (!rows.length) return el("p", { class: "muted fine" }, "Żadna grupa graczy nie ma dość recenzji w obu okresach, żeby ją porównać.");
+  rows.sort((a, b) => Math.abs(b.shift) - Math.abs(a.shift));
+  const points = (shift) => `${shift > 0 ? "+" : "−"}${Math.abs(Math.round(100 * shift))} pp`;
+  return el("div", {},
+    el("table", { class: "parts" },
+      el("thead", {}, el("tr", {}, ["Grupa", "W epizodzie", "Wcześniej", "Zmiana"].map((h) => el("th", {}, h)))),
+      el("tbody", {}, rows.map((r) => el("tr", {},
+        el("td", {}, r.label, el("span", { class: "muted" }, ` (${nf.format(r.n)})`)),
+        el("td", {}, `${Math.round(100 * r.now)}%`),
+        el("td", {}, `${Math.round(100 * r.then)}%`),
+        el("td", { class: r.shift >= 0 ? "up" : "down" }, points(r.shift)))))),
+    el("p", { class: "muted fine" },
+      `Odsetek pozytywnych recenzji w epizodzie i w ${Math.round(span / 86400000)} dniach przed nim, tylko dla grup z co najmniej ${SEGMENT_MIN} recenzjami w obu okresach. Liczy kod, od największej zmiany.`));
 }
 
 async function renderGame(appid, rangeKey, token) {
@@ -858,6 +972,7 @@ async function renderGame(appid, rangeKey, token) {
       el("div", { class: "chart-note" },
         crowded ? "Znaczniki są domyślnie wyłączone: reguły po tytule oznaczają dla tej gry zbyt wiele miesięcy jako premierę. Zmieni się to, gdy model przeczyta starsze newsy. " : "",
         `Linie przerywane to wydarzenia: w całej historii tylko premiery i nowa zawartość, w ostatnich 30 dniach także aktualizacje i zapowiedzi. W widoku procentowym pominięto okresy z mniej niż ${MIN_REVIEWS} recenzjami.`)),
+    segmentsPanel(appid),
   );
   charts = [drawPlayers(playersBox, data, appid, showMarkers, fromZero), null];
   paintReviews();

@@ -355,3 +355,47 @@ def test_episode_carries_the_agents_explanation(data_dir):
     assert (full["missing"], full["model"], full["dropped"], full["evidence_count"]) == ("Treść recenzji.", "m", 1, 2)
     assert full["shown"] == {"news": 1, "press": 0, "review": 1} and full["reviews_collected"] == 40
     assert store.episode(730, "e2")["explanation"] is None
+
+
+def collected_review(number, ms, voted_up, hours=None, language="english", steam=True, free=False):
+    return {"recommendationid": str(number), "timestamp_created": ms // 1000, "voted_up": voted_up,
+            "language": language, "playtime_at_review": None if hours is None else hours * 60,
+            "steam_purchase": steam, "received_for_free": free, "review": "text"}
+
+
+def test_review_segments_count_votes_by_playtime_language_and_purchase(data_dir):
+    rows = [
+        collected_review(1, NOW - 2 * DAY, True, hours=1),
+        collected_review(2, NOW - 2 * DAY, False, hours=1, language="polish"),
+        collected_review(3, NOW - 1 * DAY, False, hours=5, steam=False),
+        collected_review(4, NOW - 1 * DAY, True, hours=1500, free=True),
+        collected_review(5, NOW - 1 * DAY, True),  # playtime unknown
+        collected_review(5, NOW - 1 * DAY, True),  # stored twice: counted once
+        collected_review(6, NOW - 40 * DAY, False, hours=300),  # outside the window asked for
+    ]
+    append_jsonl(data_dir / "raw" / "reviews" / "730.jsonl", rows)
+    store = Store(data_dir, GAMES)
+    result = store.review_segments(730, NOW - 7 * DAY, NOW)
+    assert (result["total"], result["positive"]) == (5, 3)
+    assert result["collected"] == {"first_ms": (NOW - 40 * DAY) // 1000 * 1000, "last_ms": (NOW - DAY) // 1000 * 1000, "count": 6}
+    assert result["playtime"] == [
+        {"key": "under_2h", "n": 2, "positive": 1}, {"key": "2_10h", "n": 1, "positive": 0},
+        {"key": "over_1000h", "n": 1, "positive": 1}, {"key": "unknown", "n": 1, "positive": 1},
+    ]
+    assert result["language"] == [{"key": "english", "n": 4, "positive": 3}, {"key": "polish", "n": 1, "positive": 0}]
+    assert result["purchase"] == [
+        {"key": "steam", "n": 3, "positive": 2}, {"key": "key", "n": 1, "positive": 0}, {"key": "free", "n": 1, "positive": 1},
+    ]
+    everything = store.review_segments(730, None, None)
+    assert everything["total"] == 6 and everything["playtime"][-2]["key"] == "over_1000h"
+    assert [g["key"] for g in everything["playtime"]] == ["under_2h", "2_10h", "200_1000h", "over_1000h", "unknown"]
+
+
+def test_review_segments_without_collected_reviews(data_dir):
+    store = Store(data_dir, GAMES)
+    result = store.review_segments(730, None, None)
+    assert result["total"] == 0 and result["collected"] is None and result["playtime"] == []
+    assert store.review_segments(999, None, None) is None
+    client = TestClient(create_app(data_dir, GAMES))
+    assert client.get("/api/games/730/review-segments").json()["total"] == 0
+    assert client.get("/api/games/999/review-segments").status_code == 404

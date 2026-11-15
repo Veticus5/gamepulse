@@ -33,6 +33,10 @@ GAP_THRESHOLD = 45 * MINUTE
 # How far before an episode its possible causes are looked for, per period length.
 NEWS_LEAD = {"day": 7 * DAY, "week": 14 * DAY, "month": 14 * DAY}
 EPISODE_NEWS_LIMIT = 40
+# Playtime at the moment of the review, in hours: [from, to).
+PLAYTIME_BUCKETS = (("under_2h", 0, 2), ("2_10h", 2, 10), ("10_50h", 10, 50), ("50_200h", 50, 200),
+                    ("200_1000h", 200, 1000), ("over_1000h", 1000, None))
+TOP_LANGUAGES = 8
 
 
 def _sql_list(files: list[Path]) -> str:
@@ -91,6 +95,7 @@ class Store:
         self._events: dict[str, dict] = {}
         self._episodes: dict[int, list[dict]] = {}
         self._explanations: dict[str, dict] = {}
+        self._review_tables: dict[int, tuple] = {}
 
     # ------------------------------------------------------------ loading
 
@@ -213,6 +218,92 @@ class Store:
                 "peak_volume_ratio": round(row[14], 2), "is_open": row[15], "parts": parts.get(row[0], []),
             })
         return by_game
+
+    def _review_table(self, appid: int) -> str | None:
+        """Load one game's collected reviews (without their text) into
+        memory; reloaded when the file changes. None when there are none."""
+        path = self.data_dir / "raw" / "reviews" / f"{appid}.jsonl"
+        if not path.exists():
+            return None
+        stat = path.stat()
+        signature = (stat.st_mtime_ns, stat.st_size)
+        table = f"reviews_{appid}"
+        if self._review_tables.get(appid) != signature:
+            self._con.execute(
+                f"""
+                CREATE OR REPLACE TABLE {table} AS
+                SELECT recommendationid, any_value(timestamp_created) * 1000 AS ts_ms, any_value(voted_up) AS voted_up,
+                       any_value(language) AS language, any_value(playtime_at_review) AS playtime_minutes,
+                       any_value(steam_purchase) AS steam_purchase, any_value(received_for_free) AS received_for_free
+                FROM read_json(?, format='newline_delimited', ignore_errors=true,
+                     columns={{recommendationid:'VARCHAR', timestamp_created:'BIGINT', voted_up:'BOOLEAN',
+                              language:'VARCHAR', playtime_at_review:'BIGINT', steam_purchase:'BOOLEAN',
+                              received_for_free:'BOOLEAN'}})
+                WHERE recommendationid IS NOT NULL AND timestamp_created IS NOT NULL AND voted_up IS NOT NULL
+                GROUP BY recommendationid
+                """,
+                [str(path)],
+            )
+            self._review_tables[appid] = signature
+        return table
+
+    def review_segments(self, appid: int, from_ms: int | None, to_ms: int | None) -> dict | None:
+        """Who wrote the collected reviews in a time window, and how each
+        group voted: by playtime, language and how the game was obtained.
+        Counting only; no model takes part."""
+        if appid not in self._by_appid:
+            return None
+        with self._lock:
+            self._refresh()
+            table = self._review_table(appid)
+            empty = {"from_ms": from_ms, "to_ms": to_ms, "total": 0, "positive": 0, "collected": None,
+                     "playtime": [], "language": [], "purchase": [], "is_free": self._meta_for(appid).get("is_free")}
+            if table is None:
+                return empty
+            first, last, everything = self._rows(f"SELECT min(ts_ms), max(ts_ms), count(*) FROM {table}")[0]
+            if not everything:
+                return empty
+            lo = from_ms if from_ms is not None else first
+            hi = to_ms if to_ms is not None else last + 1
+            window = f"FROM {table} WHERE ts_ms >= ? AND ts_ms < ?"
+            total, positive = self._rows(f"SELECT count(*), count(*) FILTER (WHERE voted_up) {window}", [lo, hi])[0]
+            cases = " ".join(
+                f"WHEN playtime_minutes < {to * 60} THEN '{key}'" if to is not None else f"ELSE '{key}'"
+                for key, _, to in PLAYTIME_BUCKETS
+            )
+            by_playtime = dict(
+                (key, (n, up)) for key, n, up in self._rows(
+                    f"SELECT CASE WHEN playtime_minutes IS NULL THEN 'unknown' {cases} END AS k, "
+                    f"count(*), count(*) FILTER (WHERE voted_up) {window} GROUP BY k", [lo, hi])
+            )
+            languages = self._rows(
+                f"SELECT coalesce(language, 'unknown'), count(*) AS n, count(*) FILTER (WHERE voted_up) "
+                f"{window} GROUP BY 1 ORDER BY n DESC, 1", [lo, hi])
+            by_purchase = dict(
+                (key, (n, up)) for key, n, up in self._rows(
+                    "SELECT CASE WHEN received_for_free THEN 'free' WHEN steam_purchase THEN 'steam' ELSE 'key' END AS k, "
+                    f"count(*), count(*) FILTER (WHERE voted_up) {window} GROUP BY k", [lo, hi])
+            )
+
+        def group(key, counts):
+            n, up = counts
+            return {"key": key, "n": n, "positive": up}
+
+        top = languages[:TOP_LANGUAGES]
+        rest = languages[TOP_LANGUAGES:]
+        language = [group(key, (n, up)) for key, n, up in top]
+        if rest:
+            language.append(group("other", (sum(r[1] for r in rest), sum(r[2] for r in rest))))
+        order = [key for key, _, _ in PLAYTIME_BUCKETS] + ["unknown"]
+        return {
+            "from_ms": lo, "to_ms": hi, "total": total, "positive": positive,
+            # What is on disk at all: reviews are collected for recent weeks only.
+            "collected": {"first_ms": first, "last_ms": last, "count": everything},
+            "playtime": [group(key, by_playtime[key]) for key in order if key in by_playtime],
+            "language": language,
+            "purchase": [group(key, by_purchase[key]) for key in ("steam", "key", "free") if key in by_purchase],
+            "is_free": self._meta_for(appid).get("is_free"),
+        }
 
     def episode(self, appid: int, episode_id: str) -> dict | None:
         """One episode with the official news around it: the evidence a

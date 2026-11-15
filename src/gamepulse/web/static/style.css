@@ -179,6 +179,14 @@ a.tile:hover { border-color: var(--accent); transform: translateY(-2px); }
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .hypotheses { margin: 10px 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
 .hypotheses .cites { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 2px; }
+.segments { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 24px; }
+.segment-block h3 { margin: 0 0 8px; font-size: 14px; }
+.segment { display: grid; grid-template-columns: 140px minmax(90px, 1fr) 52px 56px; gap: 8px; align-items: center; padding: 3px 0; font-size: 13px; }
+.segment-bar { height: 10px; border-radius: 5px; background: var(--down); overflow: hidden; display: block; }
+.segment-bar i { display: block; height: 100%; background: var(--up); }
+.segment-bar.thin { background: var(--line); }
+.segment-value { text-align: right; font-variant-numeric: tabular-nums; }
+.segment-n { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
 table.parts { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
 table.parts th, table.parts td { text-align: right; padding: 4px 6px; border-top: 1px solid var(--line); }
 table.parts th:first-child, table.parts td:first-child { text-align: left; }
