@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from gamepulse import evaluate
+from gamepulse import evaluate, rate
 from gamepulse.classify import EVENT_TYPES
 from gamepulse.config import Game
 from gamepulse.web.store import NEWS_KINDS, RANGES, Store
@@ -20,6 +20,12 @@ class Label(BaseModel):
     gid: str
     event_type: str | None = None  # None = skipped by the labeller
     secondary_types: list[str] = []
+
+
+class Rating(BaseModel):
+    episode_id: str
+    rating: str
+    note: str = ""
 
 
 def create_app(data_dir: Path, games: list[Game], eval_dir: Path = Path("eval")) -> FastAPI:
@@ -112,6 +118,36 @@ def create_app(data_dir: Path, games: list[Game], eval_dir: Path = Path("eval"))
     @app.post("/api/label/undo")
     def label_undo() -> dict:
         return {"undone": evaluate.undo_last_label(eval_dir)}
+
+    @app.get("/api/rate/next")
+    def rate_next() -> dict:
+        """The next explanation by the model that nobody has rated yet,
+        with the episode and evidence needed to judge it."""
+        explanations = rate.current_explanations(games, data_dir)
+        ratings = rate.load_ratings(eval_dir)
+        todo = rate.pending(explanations, ratings)
+        by_model = sum(1 for e in explanations if e.get("source") == "model")
+        item = None
+        for candidate in todo:
+            episode = store.episode(candidate["appid"], candidate["episode_id"])
+            if episode is not None and episode.get("explanation"):
+                item = {"appid": candidate["appid"], "episode": episode,
+                        "game": next((g.name for g in games if g.appid == candidate["appid"]), "")}
+                break
+        return {"total": by_model, "done": by_model - len(todo), "item": item,
+                "summary": rate.summarise(explanations, ratings)}
+
+    @app.post("/api/rate")
+    def rate_save(rating: Rating) -> dict:
+        if rating.rating not in rate.RATINGS:
+            raise HTTPException(400, f"rating must be one of {', '.join(rate.RATINGS)}")
+        explanation = next(
+            (e for e in rate.current_explanations(games, data_dir) if e["episode_id"] == rating.episode_id), None
+        )
+        if explanation is None:
+            raise HTTPException(404, "no explanation for this episode")
+        rate.save_rating(eval_dir, explanation, rating.rating, rating.note)
+        return {"ok": True}
 
     @app.get("/")
     def index() -> FileResponse:

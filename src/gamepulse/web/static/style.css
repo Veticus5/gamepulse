@@ -267,6 +267,7 @@ table.parts th { color: var(--muted); font-weight: normal; border-top: 0; }
 
 .nav { margin-right: auto; margin-left: 8px; font-size: 13px; color: var(--muted); }
 .nav a:hover { color: var(--text); }
+.nav a + a { margin-left: 14px; }
 .label-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr); gap: 20px; align-items: start; }
 .label-news h3 { margin: 6px 0 10px; font-size: 19px; }
 .label-news .body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; max-height: 62vh; overflow-y: auto; padding-right: 8px; }
@@ -287,3 +288,8 @@ table.parts th { color: var(--muted); font-weight: normal; border-top: 0; }
 .label-choices button.active .key { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 .label-choices .confirm { justify-content: center; background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 650; padding: 12px; margin-top: 6px; position: sticky; bottom: 12px; }
 .label-choices .confirm:disabled { background: var(--panel-2); border-color: var(--line); color: var(--muted); cursor: not-allowed; }
+
+/* ---------- rating explanations */
+textarea.note { width: 100%; box-sizing: border-box; background: var(--panel-2); color: inherit; font: inherit; font-size: 14px;
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; resize: vertical; }
+.rate-buttons .chip { font-size: 14px; padding: 8px 14px; }

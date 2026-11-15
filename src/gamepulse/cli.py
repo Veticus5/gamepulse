@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import IO
 
-from gamepulse import classify, evaluate, explain, model, sync_remote, collect_review_texts, collect_prices, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
+from gamepulse import classify, evaluate, explain, model, rate, sync_remote, collect_review_texts, collect_prices, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
 from gamepulse.config import load_games
 from gamepulse.steam import make_client
 
@@ -46,7 +46,8 @@ def _parser() -> argparse.ArgumentParser:
     sample.add_argument("--add", action="store_true", help="append a fresh batch to the existing sample")
     ev = sub.add_parser("eval-classifier", parents=[steam], help="compare the model with hand-made labels")
     ev.add_argument("--model", default=classify.DEFAULT_MODEL, help="Ollama model name")
-    for command in (sample, ev):
+    rated = sub.add_parser("eval-explanations", parents=[steam], help="how often the explaining agent was right")
+    for command in (sample, ev, rated):
         command.add_argument("--eval-dir", type=Path, default=Path("eval"), help="where the sample and labels live")
     web = sub.add_parser("web", parents=[steam], help="local web interface")
     web.add_argument("--host", default="127.0.0.1", help="address to listen on")
@@ -125,6 +126,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"{len(picked)} newsów zapisanych w {path}")
         return 0 if picked else 1
+    if args.command == "eval-explanations":
+        summary = rate.summarise(rate.current_explanations(games, args.data_dir), rate.load_ratings(args.eval_dir))
+        print(rate.format_report(summary))
+        return 0 if summary["rated"] else 1
     if args.command == "eval-classifier":
         from gamepulse.storage import read_jsonl
 

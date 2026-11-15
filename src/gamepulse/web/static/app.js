@@ -1109,6 +1109,78 @@ async function renderLabel(token) {
 
 // ---------------------------------------------------------------- router
 
+// ---------------------------------------------------------------- rating explanations
+
+const RATING_BUTTONS = [
+  ["correct", "Trafne", "Wyjaśnienie zgadza się z dowodami i z tym, co wiesz o tej sytuacji"],
+  ["partly", "Częściowo", "Główna przyczyna jest inna albo jest tylko jedną z kilku"],
+  ["wrong", "Błędne", "Dowody tego nie potwierdzają albo przyczyna była inna"],
+  ["cannot_tell", "Nie umiem ocenić", "Nie da się tego rozstrzygnąć z dowodów"],
+];
+
+async function renderRate(token) {
+  const data = await api("/api/rate/next");
+  if (token !== renderToken) return;
+  if (labelKeys) document.removeEventListener("keydown", labelKeys);
+  labelKeys = null;
+  const head = el("div", { class: "panel-head" },
+    el("h2", {}, "Ocena wyjaśnień agenta"),
+    el("span", { class: "muted" }, `${data.done} z ${data.total}`));
+  if (!data.item) {
+    const rows = Object.entries(data.summary.by_verdict);
+    view.replaceChildren(el("div", { class: "panel" }, head,
+      el("p", {}, data.total ? "Wszystkie wyjaśnienia są ocenione." : "Agent nie przygotował jeszcze żadnych wyjaśnień. Uruchom: uv run gamepulse explain"),
+      rows.length ? el("table", { class: "parts" },
+        el("thead", {}, el("tr", {}, ["Werdykt agenta", "Trafne", "Częściowo", "Błędne", "Nie umiem ocenić"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, rows.map(([verdict, r]) => el("tr", {},
+          el("td", {}, (VERDICT[verdict] || VERDICT.unknown)[0]),
+          el("td", {}, r.correct), el("td", {}, r.partly), el("td", {}, r.wrong), el("td", {}, r.cannot_tell))))) : null,
+      el("p", { class: "muted" }, "Pełne zestawienie: uv run gamepulse eval-explanations")));
+    return;
+  }
+  const { appid, game, episode: e } = data.item;
+  const reopen = null;
+  const note = el("textarea", { class: "note", rows: "2", placeholder: "Notatka (opcjonalnie): co było prawdziwą przyczyną, czego zabrakło" });
+  let busy = false;
+  async function save(rating) {
+    if (busy) return;
+    busy = true;
+    try {
+      const response = await fetch("/api/rate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ episode_id: e.id, rating, note: note.value }),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      await renderRate(renderToken);
+      window.scrollTo(0, 0);
+    } catch (error) {
+      busy = false;
+      console.error(error);
+    }
+  }
+  const shiftSlot = el("div", {});
+  episodeShift(appid, e).then((node) => {
+    if (node && token === renderToken) shiftSlot.replaceChildren(el("h4", {}, "Które grupy graczy zmieniły zdanie"), node);
+  }).catch(() => {});
+  view.replaceChildren(el("div", { class: "panel" }, head,
+    el("h3", {}, `${game}: ${EPISODE_TITLE[e.direction]}`),
+    el("div", { class: "meta" }, `${episodeSpan(e)} · ${episodeLength(e)} · ${nf.format(e.reviews)} recenzji, ${pct1(e.share)} pozytywnych (zwykle ${Math.round(100 * e.baseline_share)}%)`),
+    ...explanationBlock(appid, e, e.explanation, reopen),
+    shiftSlot,
+    el("h4", {}, "Twoja ocena"),
+    el("p", { class: "muted fine" }, "Oceń, czy wyjaśnienie wynika z pokazanych dowodów i zgadza się z tym, co wiesz. Kliknij tytuł newsa, żeby go przeczytać. Klawisze 1–4."),
+    note,
+    el("div", { class: "chips rate-buttons" }, RATING_BUTTONS.map(([key, label, title], index) =>
+      el("button", { class: "chip", title, onclick: () => save(key) }, `${index + 1}. ${label}`)))));
+  labelKeys = (event) => {
+    if (event.target === note || event.ctrlKey || event.metaKey || event.altKey) return;
+    const index = Number(event.key) - 1;
+    if (index >= 0 && index < RATING_BUTTONS.length) save(RATING_BUTTONS[index][0]);
+  };
+  document.addEventListener("keydown", labelKeys);
+}
+
 async function route() {
   const token = ++renderToken;
   clearInterval(refreshTimer);
@@ -1125,6 +1197,8 @@ async function route() {
       window.scrollTo(0, parts[2] ? window.scrollY : 0);
     } else if (parts[0] === "label") {
       await renderLabel(token);
+    } else if (parts[0] === "rate") {
+      await renderRate(token);
     } else {
       if (!view.hasChildNodes()) view.replaceChildren(el("div", { class: "empty" }, "Wczytywanie…"));
       await renderOverview(token);

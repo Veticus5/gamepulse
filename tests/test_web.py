@@ -399,3 +399,26 @@ def test_review_segments_without_collected_reviews(data_dir):
     client = TestClient(create_app(data_dir, GAMES))
     assert client.get("/api/games/730/review-segments").json()["total"] == 0
     assert client.get("/api/games/999/review-segments").status_code == 404
+
+
+def test_rating_page_serves_unrated_explanations_and_stores_ratings(data_dir, tmp_path, monkeypatch):
+    from gamepulse import rate
+
+    write_episodes(data_dir, [{"id": "e1", "appid": 730, "direction": "positive", "days": [(day_of(NOW), 9, 1)]}])
+    record = {"episode_id": "e1", "appid": 730, "input_hash": "h1", "prompt_version": "e5", "model": "m",
+              "verdict": "likely", "summary": "Bo tak.", "source": "model", "hypotheses": [], "evidence": [],
+              "missing": "", "dropped": []}
+    append_jsonl(data_dir / "derived" / "explanations" / "730.jsonl", [record])
+    monkeypatch.setattr(rate.warehouse, "load_episodes",
+                        lambda d: [{"episode_id": "e1", "appid": 730, "period_end": "2026-11-15"}])
+    eval_dir = tmp_path / "eval"
+    client = TestClient(create_app(data_dir, GAMES, eval_dir))
+    first = client.get("/api/rate/next").json()
+    assert (first["total"], first["done"]) == (1, 0)
+    assert first["item"]["episode"]["id"] == "e1" and first["item"]["episode"]["explanation"]["summary"] == "Bo tak."
+    assert client.post("/api/rate", json={"episode_id": "e1", "rating": "great"}).status_code == 400
+    assert client.post("/api/rate", json={"episode_id": "nope", "rating": "correct"}).status_code == 404
+    assert client.post("/api/rate", json={"episode_id": "e1", "rating": "partly", "note": "pół na pół"}).status_code == 200
+    after = client.get("/api/rate/next").json()
+    assert (after["done"], after["item"]) == (1, None)
+    assert after["summary"]["by_verdict"]["likely"]["partly"] == 1

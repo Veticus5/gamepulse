@@ -19,6 +19,7 @@ uv run gamepulse meta           # metadane gier ze sklepu Steam (studio, premier
 uv run gamepulse pull-remote    # pomiary liczby graczy zebrane przez GitHub Actions
 uv run gamepulse model          # modele dbt i wykrywanie anomalii w recenzjach
 uv run gamepulse explain        # agent: możliwe przyczyny epizodów w recenzjach (lokalny model)
+uv run gamepulse eval-explanations  # jak często agent miał rację według Twoich ocen
 uv run gamepulse web            # interfejs pod http://127.0.0.1:8765
 uv run pytest -q                # testy, bez sieci
 ```
@@ -201,6 +202,17 @@ Ograniczenia: recenzje są zebrane tylko dla ostatnich tygodni, więc starsze ep
 opierają się na zbieżności w czasie i treści wpisów. Kod sprawdza, że wskazana
 recenzja istnieje, ale nie sprawdza, czy naprawdę mówi to, co twierdzi model.
 Trafności wyjaśnień nikt jeszcze nie zmierzył; nie ma do tego ręcznie oznaczonej próbki.
+
+### Pomiar trafności agenta
+
+1. Strona `#/rate` („Ocena wyjaśnień") pokazuje po jednym wyjaśnieniu z dowodami
+   i porównaniem grup graczy. Oceniasz: trafne, częściowo, błędne, nie umiem ocenić
+   (klawisze 1–4), opcjonalnie z notatką.
+2. Oceny trafiają do `eval/explanation_ratings.jsonl`.
+3. `uv run gamepulse eval-explanations` pokazuje oceny w podziale na werdykt agenta.
+
+Ocena dotyczy konkretnej wersji wyjaśnienia. Gdy agent wyjaśni epizod ponownie
+z nowych dowodów, wraca on do kolejki.
 
 Wyniki: `data/derived/explanations/<appid>.jsonl` (ostatnia linia dla epizodu wygrywa,
 razem z odrzuconymi twierdzeniami w polu `dropped`). Każde wywołanie modelu jest
