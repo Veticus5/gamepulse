@@ -259,6 +259,25 @@ def test_discounts_are_read_as_runs_of_days(tmp_path):
     assert explain.load_discounts(tmp_path, 999) == (None, {})
 
 
+def test_price_history_fills_the_time_before_our_own_collection(tmp_path):
+    def change(ts, percent):
+        return {"fetched_at": "2026-11-17T10:00:00Z", "since": "2025-10-13T10:00:00Z", "appid": 730,
+                "ts": ts, "currency": "USD", "initial": 2999, "final": 2999, "discount_percent": percent}
+
+    append_jsonl(tmp_path / "raw" / "prices" / "2026-11-14.jsonl", [price("2026-11-14", 0)])
+    append_jsonl(tmp_path / "raw" / "price_history" / "730.jsonl", [
+        change("2025-11-20T18:23:05Z", 50), change("2025-12-04T18:20:48Z", 0), change("2026-11-15T18:00:00Z", 25),
+    ])
+    first, daily = explain.load_discounts(tmp_path, 730)
+    assert first == date(2025, 10, 13)
+    # The sale runs from the change that started it to the one that ended it;
+    # the last known price holds until the day of the fetch.
+    assert min(daily) == date(2025, 11, 20) and daily[date(2025, 12, 4)] == 50 and date(2025, 12, 5) not in daily
+    assert [day for day in daily if day.year == 2026] == [date(2026, 11, 15), date(2026, 11, 16), date(2026, 11, 17)]
+    assert len(daily) == 15 + 3
+    assert explain.load_discounts(tmp_path, 570) == (None, {})
+
+
 def test_discount_is_evidence_the_model_can_cite(tmp_path):
     prices = (date(2026, 10, 1), {date(2026, 11, 6): 40})
     p = explain.build_pack(GAME, episode(), parts(), NEWS, EVENTS, None, prices)

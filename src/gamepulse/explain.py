@@ -222,7 +222,12 @@ def candidate_press(episode: dict, news: list[dict]) -> list[dict]:
 
 def load_discounts(data_dir: Path, appid: int) -> tuple[date | None, dict[date, int]]:
     """The first day with price data for the game and the highest discount
-    seen on each day that had one."""
+    seen on each day that had one.
+
+    Two sources are merged: the prices recorded by our own collector and the
+    log of price changes fetched from IsThereAnyDeal, which reaches back
+    before the collection started.
+    """
     first = None
     daily: dict[date, int] = {}
     for path in sorted((data_dir / "raw" / "prices").glob("*.jsonl")):
@@ -237,6 +242,21 @@ def load_discounts(data_dir: Path, appid: int) -> tuple[date | None, dict[date, 
             percent = row.get("discount_percent") or 0
             if percent > 0:
                 daily[day] = max(percent, daily.get(day, 0))
+    try:
+        log = sorted(
+            (date.fromisoformat(row["ts"][:10]), int(row["discount_percent"]),
+             date.fromisoformat(row["since"][:10]), date.fromisoformat(row["fetched_at"][:10]))
+            for row in read_jsonl(data_dir / "raw" / "price_history" / f"{appid}.jsonl")
+        )
+    except (KeyError, TypeError, ValueError):
+        log = []  # a file in a shape we do not know is ignored as a whole
+    for index, (day, percent, since, fetched) in enumerate(log):
+        first = since if first is None or since < first else first
+        # A price holds until the next change; the last one until the fetch.
+        until = log[index + 1][0] if index + 1 < len(log) else fetched
+        while percent > 0 and day <= until:
+            daily[day] = max(percent, daily.get(day, 0))
+            day += timedelta(days=1)
     return first, daily
 
 

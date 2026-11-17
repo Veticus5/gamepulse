@@ -627,7 +627,8 @@ function explanationBlock(appid, e, explanation, reopen) {
                 el("span", { class: "muted fine" }, `${c.id} · recenzja ${c.voted_up ? "pozytywna" : "negatywna"} · ${nf.format(c.playtime_hours || 0)} godz. gry · ${c.language || ""}`),
                 el("span", {}, c.text || ""))
             : c.kind === "discount"
-            ? el("span", { class: "fine" }, `${c.id}: przecena ${c.percent}% w sklepie Steam, ${c.published} – ${c.until}`)
+            ? el("span", { class: "fine" }, `${c.id}: przecena ${c.percent}% w sklepie Steam, ${c.published} – ${c.until} (historia cen: `,
+                el("a", { class: "link", href: "https://isthereanydeal.com", target: "_blank", rel: "noopener noreferrer" }, "IsThereAnyDeal"), ")")
             : el("button", { class: "link", onclick: () => openNews(appid, c.gid, reopen) },
                 `${c.id}${c.kind === "press" ? " (prasa)" : ""}: ${c.title || "(bez tytułu)"}`)))))) : null,
       explanation.missing ? el("div", { class: "muted" }, `Czego brakuje do pewności: ${explanation.missing}`) : null,

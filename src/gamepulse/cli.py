@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import IO
 
-from gamepulse import classify, evaluate, explain, model, rate, sync_remote, collect_review_texts, collect_prices, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
+from gamepulse import classify, evaluate, explain, model, rate, sync_remote, collect_review_texts, collect_prices, collect_price_history, collect_ccu, collect_fivem, collect_meta, collect_news, collect_reviews
 from gamepulse.config import load_games
 from gamepulse.steam import make_client
 
@@ -31,6 +31,8 @@ def _parser() -> argparse.ArgumentParser:
     texts.add_argument("--days", type=int, default=30, help="how far back the history should reach (default 30)")
     texts.add_argument("--max-pages", type=int, default=300, help="pages of 100 reviews per game and run (default 300)")
     sub.add_parser("prices", parents=[steam], help="current store price and discount of every game")
+    hist = sub.add_parser("price-history", parents=[steam], help="past Steam prices from IsThereAnyDeal (needs ITAD_API_KEY)")
+    hist.add_argument("--days", type=int, default=400, help="how far back to ask (default 400)")
     sub.add_parser("meta", parents=[steam], help="Steam store metadata snapshot")
     cls = sub.add_parser("classify", parents=[steam], help="label official news with the local model")
     cls.add_argument("--since-days", type=int, default=90, help="only news this recent (default 90)")
@@ -161,6 +163,12 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "prices":
             succeeded = collect_prices.run(client, games, args.data_dir)
+        elif args.command == "price-history":
+            key = collect_price_history.api_key()
+            if not key:
+                print("price-history: set ITAD_API_KEY in the environment or in .env", file=sys.stderr)
+                return 1
+            succeeded = collect_price_history.run(client, games, args.data_dir, key=key, days=args.days)
         elif args.command == "review-texts":
             succeeded = collect_review_texts.run(client, games, args.data_dir, days=args.days, max_pages=args.max_pages)
         elif args.command == "explain":
