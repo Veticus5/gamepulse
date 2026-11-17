@@ -4,8 +4,26 @@
     {
       "name": "gamepulse-web",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "gamepulse", "web"],
+      "runtimeArgs": [
+        "run",
+        "gamepulse",
+        "web"
+      ],
       "port": 8765
+    },
+    {
+      "name": "gamepulse-demo",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8766",
+        "--directory",
+        "demo",
+        "--bind",
+        "127.0.0.1"
+      ],
+      "port": 8766
     }
   ]
 }
