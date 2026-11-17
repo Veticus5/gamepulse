@@ -195,6 +195,61 @@ def test_reviews_are_sampled_by_side_helpfulness_and_chance():
     assert sum(1 for r in both if r["voted_up"]) == 15
 
 
+def long_episode_reviews():
+    # March starts all positive; from April on only one review in five is.
+    out, n = [], 0
+    for day, positive in (("2026-03-05", 30), ("2026-03-20", 15), ("2026-04-10", 6), ("2026-04-25", 6), ("2026-05-10", 6), ("2026-05-25", 6)):
+        for i in range(30):
+            n += 1
+            out.append(player_review(n, day, i < positive, votes_up=i))
+    return out
+
+
+def test_short_episode_is_not_split():
+    assert explain.episode_parts(date(2026, 11, 6), date(2026, 11, 27)) == []  # three weeks: one piece
+    p = explain.build_pack(GAME, episode(direction="negative"), parts(), NEWS, EVENTS, many_reviews())
+    assert "review_parts" not in p and all("part" not in item for item in p["evidence"])
+
+
+def test_long_episode_is_split_into_equal_parts():
+    found = explain.episode_parts(date(2026, 3, 1), date(2026, 6, 1))  # 92 days
+    assert len(found) == 6 and found[0][0] == date(2026, 3, 1) and found[-1][1] == date(2026, 6, 1)
+    assert all(a[1] == b[0] for a, b in zip(found, found[1:]))  # no gaps, no overlap
+    assert len(explain.episode_parts(date(2026, 10, 1), date(2026, 11, 1))) == 5  # a month: about a week each
+
+
+def test_long_episode_gets_a_sample_and_numbers_for_every_part():
+    long = episode(start="2026-03-01", end="2026-06-01", direction="negative", grain="month")
+    p = explain.build_pack(GAME, long, parts(), NEWS, EVENTS, long_episode_reviews())
+    sample = [item for item in p["evidence"] if item["kind"] == "review"]
+    assert [item["id"] for item in sample] == [f"R{i}" for i in range(1, len(sample) + 1)]
+    by_part = {}
+    for item in sample:
+        by_part.setdefault(item["part"], []).append(item)
+    assert sorted(by_part) == [1, 2, 3, 4, 5, 6]
+    assert all(len(items) == 8 and sum(1 for i in items if not i["voted_up"]) == 6 for part, items in by_part.items() if part > 1)
+    assert len(by_part[1]) == 8 and all(i["voted_up"] for i in by_part[1])  # no negative ones there: positive fill the part
+    assert [item["part"] for item in sample] == sorted(item["part"] for item in sample)  # shown in time order
+    # Code counts every collected review of a part, not only the sampled ones.
+    assert [(part["start"], part["end"], part["reviews"]) for part in p["review_parts"]][:2] == [
+        ("2026-03-01", "2026-03-16", 30), ("2026-03-16", "2026-04-01", 30),
+    ]
+    assert p["review_parts"][0]["share"] == "100,0%" and p["review_parts"][5]["share"] == "20,0%"
+    text = explain.render_pack(p)
+    assert "Part 1 of 6, 2026-03-01 to 2026-03-16: 30 reviews collected, 100,0% positive" in text
+    assert "parts may have different causes" in text
+    assert text.index("Part 2 of 6") < text.index(f"[{by_part[2][0]['id']}]") < text.index("Part 3 of 6")
+    assert p == explain.build_pack(GAME, long, parts(), NEWS, EVENTS, long_episode_reviews())  # same every time
+
+
+def test_part_without_reviews_is_said_so():
+    long = episode(start="2026-03-01", end="2026-06-01", direction="negative", grain="month")
+    only_may = [r for r in long_episode_reviews() if r["timestamp_created"] >= 1778000000]
+    p = explain.build_pack(GAME, long, parts(), NEWS, EVENTS, only_may)
+    assert p["review_parts"][0]["reviews"] == 0 and p["review_parts"][0]["share"] is None
+    assert "Part 1 of 6, 2026-03-01 to 2026-03-16: no reviews collected" in explain.render_pack(p)
+
+
 def test_reviews_are_shown_to_the_model_as_data():
     p = explain.build_pack(GAME, episode(direction="negative"), parts(), NEWS, EVENTS, many_reviews())
     text = explain.render_pack(p)

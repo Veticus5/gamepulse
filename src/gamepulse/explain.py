@@ -53,6 +53,11 @@ MAX_PRESS = 6
 PRESS_EXCERPT_CHARS = 500
 # Reviews shown to the model: mostly from the side the episode is on, a few from the other.
 REVIEW_SAMPLE = {"negative": (24, 6), "positive": (6, 24), "volume": (15, 15)}  # (negative, positive)
+# An episode longer than this is shown in parts, each with its own sample:
+# what players wrote in its first weeks need not be what they wrote at the end.
+LONG_EPISODE_DAYS = 21
+MAX_EPISODE_PARTS = 6
+PART_SAMPLE = {"negative": (6, 2), "positive": (2, 6), "volume": (4, 4)}  # (negative, positive) per part
 REVIEW_CHARS = 300
 MIN_REVIEW_CHARS = 40
 # With at least this many reviews shown, "likely" needs a hypothesis that players' own words support.
@@ -285,6 +290,37 @@ def candidate_discounts(episode: dict, daily: dict[date, int]) -> list[dict]:
     ]
 
 
+def episode_parts(start: date, end: date) -> list[tuple[date, date]]:
+    """Equal slices of a long episode, about a week each and at most six;
+    nothing for an episode short enough to be read as one piece."""
+    days = (end - start).days
+    if days <= LONG_EPISODE_DAYS:
+        return []
+    count = min(MAX_EPISODE_PARTS, -(-days // 7))
+    edges = [start + timedelta(days=round(index * days / count)) for index in range(count + 1)]
+    return list(zip(edges, edges[1:]))
+
+
+def _review_day(review: dict) -> date:
+    return datetime.fromtimestamp(review["timestamp_created"], UTC).date()
+
+
+def _sample(pool: list[dict], wanted: tuple[int, int], rng: random.Random, fill: bool) -> list[dict]:
+    """Half of each side the most helpful, half at random. With `fill`, a side
+    that has too few reviews is made up for from the other side."""
+    picked, spare = [], []
+    for voted_up, count in ((False, wanted[0]), (True, wanted[1])):
+        side = sorted((r for r in pool if bool(r.get("voted_up")) == voted_up),
+                      key=lambda r: (-(r.get("votes_up") or 0), r["recommendationid"]))
+        helpful, rest = side[: count // 2], side[count // 2:]
+        drawn = rng.sample(rest, min(count - len(helpful), len(rest)))
+        picked += helpful + drawn
+        spare += [r for r in rest if r not in drawn]
+    if fill:
+        picked += spare[: sum(wanted) - len(picked)]
+    return picked
+
+
 def pick_reviews(episode: dict, reviews: list[dict]) -> list[dict]:
     """A fixed sample of the reviews written during the episode.
 
@@ -292,37 +328,54 @@ def pick_reviews(episode: dict, reviews: list[dict]) -> list[dict]:
     often, half are drawn at random (the same ones on every run), so the
     sample shows both what resonated and what an ordinary review said.
     Very short reviews say nothing about causes and are left out.
+    A long episode gets a smaller sample from each of its parts instead.
     """
-    wanted_negative, wanted_positive = REVIEW_SAMPLE[episode["direction"]]
     rng = random.Random(episode["episode_id"])
     usable = {}
     for review in reviews:
         text = re.sub(r"\s+", " ", classify.clean_text(review.get("review"))).strip()
         if len(text) >= MIN_REVIEW_CHARS and isinstance(review.get("timestamp_created"), int):
             usable[review["recommendationid"]] = {**review, "text": text}
-    picked = []
-    for voted_up, wanted in ((False, wanted_negative), (True, wanted_positive)):
-        pool = sorted((r for r in usable.values() if bool(r.get("voted_up")) == voted_up),
-                      key=lambda r: (-(r.get("votes_up") or 0), r["recommendationid"]))
-        helpful = pool[: wanted // 2]
-        rest = pool[wanted // 2:]
-        picked += helpful + rng.sample(rest, min(wanted - len(helpful), len(rest)))
+    slices = episode_parts(_day(episode["period_start"]), _day(episode["period_end"]))
+    if slices:
+        picked = []
+        for number, (since, until) in enumerate(slices, 1):
+            pool = [r for r in usable.values() if since <= _review_day(r) < until]
+            picked += [{**r, "part": number} for r in _sample(pool, PART_SAMPLE[episode["direction"]], rng, fill=True)]
+    else:
+        picked = _sample(list(usable.values()), REVIEW_SAMPLE[episode["direction"]], rng, fill=False)
     picked.sort(key=lambda r: (r["timestamp_created"], r["recommendationid"]))
     return [
         {
             "id": f"R{index}",
             "kind": "review",
             "recommendationid": r["recommendationid"],
-            "published": datetime.fromtimestamp(r["timestamp_created"], UTC).date(),
+            "published": _review_day(r),
             "effective": None,
             "voted_up": bool(r.get("voted_up")),
             "language": r.get("language"),
             "playtime_hours": round((r.get("playtime_at_review") or 0) / 60),
             "excerpt": r["text"][:REVIEW_CHARS],
             "timing": "review",
+            **({"part": r["part"]} if "part" in r else {}),
         }
         for index, r in enumerate(picked, 1)
     ]
+
+
+def review_parts(episode: dict, reviews: list[dict]) -> list[dict]:
+    """How many collected reviews each part of a long episode has and how
+    many of them are positive; counted over all of them, not the sample."""
+    unique = {r["recommendationid"]: r for r in reviews if isinstance(r.get("timestamp_created"), int)}
+    found = []
+    for since, until in episode_parts(_day(episode["period_start"]), _day(episode["period_end"])):
+        inside = [r for r in unique.values() if since <= _review_day(r) < until]
+        positive = sum(1 for r in inside if r.get("voted_up"))
+        found.append({
+            "start": since.isoformat(), "end": until.isoformat(), "reviews": len(inside),
+            "share": _pct(positive / len(inside)) if inside else None,
+        })
+    return found
 
 
 def build_pack(
@@ -337,7 +390,10 @@ def build_pack(
         + candidate_discounts(episode, prices[1]) + pick_reviews(episode, reviews)
     )
     periods = sorted({(_day(p["period_start"]), p["reviews"], p["share_positive"], p["baseline_share"]) for p in parts})
+    split = review_parts(episode, reviews) if reviews else []
     return {
+        # Only a long episode with reviews has parts; the key is absent otherwise.
+        **({"review_parts": split} if split else {}),
         "episode_id": episode["episode_id"],
         "appid": game.appid,
         "game": game.name,
@@ -417,12 +473,28 @@ def render_pack(pack: dict) -> str:
             f"PLAYER REVIEWS written during the episode: a sample of {len(sample)} out of "
             f"{pack['reviews_collected']} collected",
         ]
-        for item in sample:
-            lines += [
-                f"[{item['id']}] {item['published']}, {'positive' if item['voted_up'] else 'negative'} review, "
-                f"{item['playtime_hours']} hours played, written in {item['language']}",
-                f"<review>{item['excerpt']}</review>",
-            ]
+        split = pack.get("review_parts") or []
+        if split:
+            lines.append(
+                "The episode is long, so the reviews are shown in parts. Different parts may have different "
+                "causes: say which part a cause belongs to, and do not explain the whole episode with "
+                "something only one part's reviews mention."
+            )
+        for number, part in enumerate(split or [None], 1):
+            if part:
+                lines.append(
+                    f"Part {number} of {len(split)}, {part['start']} to {part['end']}: "
+                    + (f"{part['reviews']} reviews collected, {part['share']} positive" if part["reviews"]
+                       else "no reviews collected")
+                )
+            for item in sample:
+                if part and item.get("part") != number:
+                    continue
+                lines += [
+                    f"[{item['id']}] {item['published']}, {'positive' if item['voted_up'] else 'negative'} review, "
+                    f"{item['playtime_hours']} hours played, written in {item['language']}",
+                    f"<review>{item['excerpt']}</review>",
+                ]
     else:
         lines += ["", "PLAYER REVIEWS: none collected for this episode."]
     lines += ["", "Odpowiedz po polsku: summary, claim i missing muszą być napisane po polsku."]
