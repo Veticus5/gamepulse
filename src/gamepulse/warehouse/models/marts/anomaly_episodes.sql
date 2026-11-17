@@ -22,7 +22,7 @@ with periods as (
 
 last_finished as (
     select appid, grain, max(period_end) as period_end
-    from {{ ref('review_baselines') }}
+    from {{ ref('int_review_baselines') }}
     group by all
 ),
 

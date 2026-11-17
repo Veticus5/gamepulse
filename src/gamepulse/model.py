@@ -33,8 +33,12 @@ def episodes_path(data_dir: Path) -> Path:
     return data_dir / "derived" / "anomaly_episodes.parquet"
 
 
-def run(data_dir: Path) -> int:
-    """Run all dbt models and tests; return the number of anomalies found."""
+def run(data_dir: Path, games: list | None = None) -> int:
+    """Run all dbt models and tests; return the number of anomalies found.
+
+    `games` is the tracked game list; it is written next to the other inputs
+    so the models can name the games. Without it the previous list is used.
+    """
     data_dir = data_dir.resolve()
     out = anomalies_path(data_dir)
     if not any((data_dir / "raw" / "review_histogram").glob("*.jsonl")):
@@ -42,6 +46,15 @@ def run(data_dir: Path) -> int:
         out.unlink(missing_ok=True)
         episodes_path(data_dir).unlink(missing_ok=True)
         return 0
+
+    if games is not None:
+        listing = data_dir / "derived" / "games.jsonl"
+        listing.parent.mkdir(parents=True, exist_ok=True)
+        tmp = listing.with_suffix(".tmp")
+        tmp.write_text("".join(
+            json.dumps({"appid": game.appid, "name": game.name}, ensure_ascii=False) + "\n" for game in games
+        ))
+        tmp.replace(listing)
 
     db = warehouse_path(data_dir)
     db.parent.mkdir(parents=True, exist_ok=True)
@@ -58,7 +71,7 @@ def run(data_dir: Path) -> int:
             "--profiles-dir", str(PROJECT_DIR),
             "--target-path", str(db.parent / "target"),
             "--log-path", str(db.parent / "logs"),
-            "--vars", json.dumps({"raw_dir": str(data_dir / "raw")}),
+            "--vars", json.dumps({"raw_dir": str(data_dir / "raw"), "derived_dir": str(data_dir / "derived")}),
         ],
         env={**os.environ, "GAMEPULSE_DUCKDB": str(db), "DO_NOT_TRACK": "1"},
         capture_output=True,

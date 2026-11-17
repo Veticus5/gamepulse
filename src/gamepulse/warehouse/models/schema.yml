@@ -1,10 +1,86 @@
 version: 2
 
+# Layers: staging (stg_*, one view per source, the only place that reads
+# files), intermediate (int_*, facts per game and period), marts (what the
+# site and the agent read). Data flows one way only.
+
 models:
-  - name: review_periods
+  # --- staging
+  - name: stg_review_snapshots
+    description: One stored snapshot of a game's review histogram.
+  - name: stg_player_counts
+    description: One successful measurement of a game's current player count.
+    tests:
+      - unique:
+          column_name: "appid || ' ' || measured_at"
+    columns:
+      - name: appid
+        tests: [not_null]
+      - name: measured_at
+        tests: [not_null]
+      - name: player_count
+        tests: [not_null]
+  - name: stg_fivem_counts
+    description: One successful read of one of FiveM's own count files.
+    tests:
+      - unique:
+          column_name: "source_url || ' ' || measured_at"
+  - name: stg_prices
+    description: One read of a game's price in the US Steam store, in cents.
+    tests:
+      - unique:
+          column_name: "appid || ' ' || observed_at"
+  - name: stg_price_changes
+    description: One change of a game's Steam price, from IsThereAnyDeal.
+    tests:
+      - unique:
+          column_name: "appid || ' ' || changed_at"
+  - name: stg_news
+    description: One news item Steam lists for a game, in the version stored last.
+    columns:
+      - name: gid
+        tests: [unique, not_null]
+  - name: stg_news_events
+    description: The classifier's latest label of one news item (model output).
+    columns:
+      - name: gid
+        tests: [unique, not_null]
+  - name: stg_explanations
+    description: The agent's latest explanation of one episode (model output).
+    columns:
+      - name: episode_id
+        tests: [unique, not_null]
+      - name: verdict
+        tests:
+          - accepted_values:
+              arguments:
+                values: [likely, possible, unknown]
+  - name: stg_games
+    description: One tracked game, from the project's own game list.
+    columns:
+      - name: appid
+        tests: [unique, not_null]
+
+  # --- intermediate
+  - name: int_review_periods
     description: Review counts per game and period (day, week or month).
-  - name: review_baselines
+  - name: int_review_baselines
     description: Finished periods with the median of the periods before them.
+  - name: int_player_counts_daily
+    description: Player counts per game and UTC day.
+    tests:
+      - unique:
+          column_name: "appid || ' ' || day"
+  - name: int_prices_daily
+    description: Price and discount per game and UTC day, from our own readings and the price log.
+    tests:
+      - unique:
+          column_name: "appid || ' ' || day"
+    columns:
+      - name: discount_percent
+        tests: [not_null]
+
+  # --- marts
   - name: anomalies
     description: Periods whose review score or volume is clearly unusual for the game.
     columns:
@@ -13,7 +89,8 @@ models:
       - name: kind
         tests:
           - accepted_values:
-              values: [review_score_drop, review_score_rise, review_volume_spike]
+              arguments:
+                values: [review_score_drop, review_score_rise, review_volume_spike]
   - name: anomaly_episodes
     description: Runs of neighbouring unusual periods; the unit the agent explains.
     columns:
@@ -22,4 +99,20 @@ models:
       - name: direction
         tests:
           - accepted_values:
-              values: [negative, positive, volume]
+              arguments:
+                values: [negative, positive, volume]
+  - name: episode_explanations
+    description: Every episode with the agent's latest explanation, if it has one.
+    columns:
+      - name: episode_id
+        tests: [unique, not_null]
+  - name: news
+    description: Every news item of a tracked game with the classifier's label, if it has one.
+    columns:
+      - name: gid
+        tests: [unique, not_null]
+  - name: games
+    description: Every game with its current player count, price, reviews and episodes.
+    columns:
+      - name: appid
+        tests: [unique, not_null]

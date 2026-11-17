@@ -9,6 +9,8 @@ flags:
 vars:
   # Absolute path of data/raw; set by `gamepulse model`.
   raw_dir: data/raw
+  # Absolute path of data/derived: model output and the game list.
+  derived_dir: data/derived
   # How many earlier finished periods a period is compared with.
   baseline_windows: {day: 14, week: 12, month: 12}
   # Fewer earlier periods than this: no verdict.

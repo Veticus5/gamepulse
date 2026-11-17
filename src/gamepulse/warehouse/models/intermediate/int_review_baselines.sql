@@ -11,7 +11,7 @@ select
     median(reviews) over w as baseline_reviews,
     median(ln(reviews)) over w as baseline_ln_reviews,
     mad(ln(reviews)) over w as baseline_ln_reviews_mad
-from {{ ref('review_periods') }} as p
+from {{ ref('int_review_periods') }} as p
 where grain = '{{ grain }}' and is_complete and reviews > 0
 window w as (
     partition by appid

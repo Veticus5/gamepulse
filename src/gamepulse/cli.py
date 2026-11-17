@@ -57,7 +57,7 @@ def _parser() -> argparse.ArgumentParser:
     web.add_argument("--eval-dir", type=Path, default=Path("eval"), help="where the sample and labels live")
     pull = sub.add_parser("pull-remote", parents=[data], help="copy player counts collected by GitHub Actions")
     pull.add_argument("--repo", type=Path, default=Path("."), help="the git repository whose data branch is read")
-    sub.add_parser("model", parents=[data], help="build the dbt tables and find review anomalies")
+    sub.add_parser("model", parents=[steam], help="build the dbt tables and find review anomalies")
     sub.add_parser("fivem", parents=[data], help="FiveM total player counts (not from Steam)")
     return parser
 
@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         with lock:
             try:
-                count = model.run(args.data_dir)
+                count = model.run(args.data_dir, load_games(args.games) if args.games.exists() else None)
             except RuntimeError as exc:
                 print(f"gamepulse: {exc}", file=sys.stderr)
                 return 1

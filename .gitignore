@@ -7,3 +7,5 @@ __pycache__/
 
 # local secrets
 .env
+src/gamepulse/warehouse/logs/
+src/gamepulse/warehouse/target/

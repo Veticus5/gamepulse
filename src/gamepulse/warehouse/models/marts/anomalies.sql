@@ -13,7 +13,7 @@ with scored as (
         ) as share_z,
         reviews / baseline_reviews as volume_ratio,
         (ln(reviews) - baseline_ln_reviews) / greatest(1.4826 * baseline_ln_reviews_mad, 0.1) as volume_z
-    from {{ ref('review_baselines') }}
+    from {{ ref('int_review_baselines') }}
     where baseline_periods >= {{ var('min_baseline_periods') }}
 ),
 
