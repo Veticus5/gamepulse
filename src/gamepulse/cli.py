@@ -55,7 +55,7 @@ def _parser() -> argparse.ArgumentParser:
     web.add_argument("--host", default="127.0.0.1", help="address to listen on")
     web.add_argument("--port", type=int, default=8765)
     web.add_argument("--eval-dir", type=Path, default=Path("eval"), help="where the sample and labels live")
-    pull = sub.add_parser("pull-remote", parents=[data], help="copy player counts collected by GitHub Actions")
+    pull = sub.add_parser("pull-remote", parents=[steam], help="copy player counts collected by GitHub Actions, then rebuild the tables")
     pull.add_argument("--repo", type=Path, default=Path("."), help="the git repository whose data branch is read")
     sub.add_parser("model", parents=[steam], help="build the dbt tables and find review anomalies")
     sub.add_parser("fivem", parents=[data], help="FiveM total player counts (not from Steam)")
@@ -87,6 +87,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"gamepulse: {exc}", file=sys.stderr)
             return 1
         print(f"Zaktualizowane pliki z GitHuba: {changed}")
+        # The site reads the published tables, so fresh measurements show only after a build.
+        lock = _acquire_lock(args.data_dir, "model")
+        if lock is None:
+            logging.warning("model: another run is in progress, the tables stay as they are")
+            return 0
+        with lock:
+            try:
+                model.run(args.data_dir, load_games(args.games) if args.games.exists() else None)
+            except RuntimeError as exc:
+                print(f"gamepulse: {exc}", file=sys.stderr)
+                return 1
         return 0
     if args.command == "model":
         lock = _acquire_lock(args.data_dir, "model")

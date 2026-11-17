@@ -5,6 +5,7 @@ so the interface always shows what the collectors last wrote without
 re-parsing everything on each request.
 """
 
+import json
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,7 +15,7 @@ import duckdb
 from gamepulse.config import Game
 from gamepulse.storage import read_jsonl
 from gamepulse.classify import priority_of
-from gamepulse.model import anomalies_path, episodes_path
+from gamepulse.model import anomalies_path, episodes_path, table_path
 from gamepulse.web.events import classify as rule_category
 
 MINUTE = 60_000
@@ -115,34 +116,31 @@ class Store:
             return
         self._con.execute(f"CREATE OR REPLACE TABLE {table} AS {select.format(files=_sql_list(files))}")
 
+    def _table(self, name: str) -> list[Path]:
+        path = table_path(self.data_dir, name)
+        return [path] if path.exists() else []
+
     def _refresh(self) -> None:
-        files = self._files("ccu")
+        # Player counts, news and model output come from the tables the dbt
+        # models publish; nothing here reads those raw files.
+        files = self._table("player_counts")
         if self._changed("ccu", files):
             self._load_table(
                 "ccu",
                 files,
                 "ts_ms BIGINT, appid BIGINT, player_count BIGINT",
-                """
-                SELECT epoch_ms(CAST(ts AS TIMESTAMPTZ)) AS ts_ms, appid, player_count
-                FROM read_json({files}, format='newline_delimited', ignore_errors=true,
-                     columns={{ts:'VARCHAR', appid:'BIGINT', player_count:'BIGINT', ok:'BOOLEAN'}})
-                WHERE ok AND player_count IS NOT NULL AND ts IS NOT NULL
-                """,
+                "SELECT epoch_ms(measured_at) AS ts_ms, appid, player_count FROM read_parquet({files})",
             )
-        files = self._files("fivem")
+        files = self._table("fivem_players")
         if self._changed("fivem", files):
             self._load_table(
                 "fivem",
                 files,
                 "ts_ms BIGINT, players BIGINT",
-                f"""
-                SELECT epoch_ms(CAST(ts AS TIMESTAMPTZ)) AS ts_ms, counts[1] AS players
-                FROM read_json({{files}}, format='newline_delimited', ignore_errors=true,
-                     columns={{{{ts:'VARCHAR', url:'VARCHAR', counts:'BIGINT[]', ok:'BOOLEAN'}}}})
-                WHERE ok AND url = '{FIVEM_LIVE_SOURCE}' AND counts[1] IS NOT NULL
-                """,
+                f"SELECT epoch_ms(measured_at) AS ts_ms, players FROM read_parquet({{files}}) "
+                f"WHERE source_url = '{FIVEM_LIVE_SOURCE}'",
             )
-        files = self._files("news")
+        files = self._table("news")
         if self._changed("news", files):
             self._load_table(
                 "news",
@@ -150,35 +148,45 @@ class Store:
                 "gid VARCHAR, appid BIGINT, title VARCHAR, date_ms BIGINT, feedlabel VARCHAR, "
                 "feed_type BIGINT, url VARCHAR, author VARCHAR, contents VARCHAR, tags VARCHAR[]",
                 """
-                SELECT gid, any_value(appid) AS appid, any_value(title) AS title,
-                       any_value(date) * 1000 AS date_ms, any_value(feedlabel) AS feedlabel,
-                       any_value(feed_type) AS feed_type, any_value(url) AS url,
-                       any_value(author) AS author, any_value(contents) AS contents,
-                       any_value(tags) AS tags
-                FROM read_json({files}, format='newline_delimited', ignore_errors=true,
-                     columns={{gid:'VARCHAR', appid:'BIGINT', title:'VARCHAR', date:'BIGINT',
-                              feedlabel:'VARCHAR', feed_type:'BIGINT', url:'VARCHAR',
-                              author:'VARCHAR', contents:'VARCHAR', tags:'VARCHAR[]'}})
-                WHERE gid IS NOT NULL AND date IS NOT NULL AND appid IS NOT NULL
-                GROUP BY gid
+                SELECT gid, appid, title, epoch_ms(published_at) AS date_ms, feed_label AS feedlabel,
+                       feed_type, url, author, contents, tags
+                FROM read_parquet({files})
                 """,
             )
+            self._events = {}
+            if files:
+                cursor = self._con.execute(
+                    f"""
+                    SELECT gid, event_type, strftime(effective_date, '%Y-%m-%d') AS effective_date,
+                           label_summary AS summary, importance, secondary_types, label_confidence AS confidence
+                    FROM read_parquet({_sql_list(files)}) WHERE is_labelled
+                    """
+                )
+                names = [d[0] for d in cursor.description]
+                self._events = {row[0]: dict(zip(names, row)) for row in cursor.fetchall()}
         files = self._files("review_histogram")
         if self._changed("reviews", files):
             self._reviews = self._latest_snapshots(files, "results")
-        files = sorted((self.data_dir / "derived" / "news_events").glob("*.jsonl"))
-        if self._changed("events", files):
-            # Later lines win, so a re-classification replaces the earlier label.
-            self._events = {row.get("gid"): row for path in files for row in read_jsonl(path)}
         paths = [p for p in (episodes_path(self.data_dir), anomalies_path(self.data_dir)) if p.exists()]
         if self._changed("episodes", paths):
             self._episodes = self._load_episodes(*paths) if len(paths) == 2 else {}
-        files = sorted((self.data_dir / "derived" / "explanations").glob("*.jsonl"))
+        files = self._table("explanations")
         if self._changed("explanations", files):
-            # Later lines win, so a newer explanation replaces the earlier one.
-            self._explanations = {
-                row["episode_id"]: row for path in files for row in read_jsonl(path) if "episode_id" in row
-            }
+            self._explanations = {}
+            if files:
+                cursor = self._con.execute(
+                    f"""
+                    SELECT episode_id, verdict, summary, missing, hypotheses, evidence, dropped, reviews_collected,
+                           answered_by AS source, model, strftime(explained_at, '%Y-%m-%dT%H:%M:%SZ') AS explained_at
+                    FROM read_parquet({_sql_list(files)})
+                    """
+                )
+                names = [d[0] for d in cursor.description]
+                for row in cursor.fetchall():
+                    record = dict(zip(names, row))
+                    for key in ("hypotheses", "evidence", "dropped"):
+                        record[key] = json.loads(record[key]) if record[key] else []
+                    self._explanations[record["episode_id"]] = record
         files = self._files("appdetails")
         if self._changed("meta", files):
             self._meta = self._latest_snapshots(files, "details")

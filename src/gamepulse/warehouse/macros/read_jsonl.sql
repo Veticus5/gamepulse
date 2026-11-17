@@ -8,7 +8,9 @@
   columns, so a source that has not been collected does not break the build.
 
   `columns` maps a column name to its DuckDB type. The file path is available
-  as the column `filename`.
+  as the column `filename`, and `line_no` numbers the rows in the order they
+  were read (files by name, lines as written), so that "the later line wins"
+  can be said for append-only logs without a timestamp.
 #}
 {% macro read_jsonl(glob, columns) %}
     {%- set found = true -%}
@@ -16,7 +18,7 @@
         {%- set found = run_query("select count(*) from glob('" ~ glob ~ "')").columns[0].values()[0] > 0 -%}
     {%- endif -%}
     {%- if found -%}
-    read_json(
+    (select *, row_number() over () as line_no from read_json(
         '{{ glob }}',
         format = 'newline_delimited',
         ignore_errors = true,
@@ -26,14 +28,15 @@
             '{{ name }}': '{{ type }}'{{ "," if not loop.last }}
             {%- endfor %}
         }
-    )
+    ))
     {%- else -%}
     (
         select
             {%- for name, type in columns.items() %}
             cast(null as {{ type }}) as "{{ name }}",
             {%- endfor %}
-            cast(null as varchar) as filename
+            cast(null as varchar) as filename,
+            cast(null as bigint) as line_no
         where false
     )
     {%- endif -%}

@@ -33,6 +33,15 @@ def episodes_path(data_dir: Path) -> Path:
     return data_dir / "derived" / "anomaly_episodes.parquet"
 
 
+# Marts the site and the agent read. Each is published as one parquet file,
+# because only one process can hold the database open while dbt builds it.
+PUBLISHED = ("player_counts", "fivem_players", "prices_daily", "news", "explanations", "episode_explanations", "games")
+
+
+def table_path(data_dir: Path, table: str) -> Path:
+    return data_dir / "derived" / "tables" / f"{table}.parquet"
+
+
 def run(data_dir: Path, games: list | None = None) -> int:
     """Run all dbt models and tests; return the number of anomalies found.
 
@@ -41,11 +50,6 @@ def run(data_dir: Path, games: list | None = None) -> int:
     """
     data_dir = data_dir.resolve()
     out = anomalies_path(data_dir)
-    if not any((data_dir / "raw" / "review_histogram").glob("*.jsonl")):
-        log.warning("model: no review data in %s yet", data_dir)
-        out.unlink(missing_ok=True)
-        episodes_path(data_dir).unlink(missing_ok=True)
-        return 0
 
     if games is not None:
         listing = data_dir / "derived" / "games.jsonl"
@@ -86,6 +90,12 @@ def run(data_dir: Path, games: list | None = None) -> int:
             tmp = path.with_suffix(".tmp")
             con.execute(f"COPY (SELECT * FROM {table} ORDER BY period_start, appid, grain, 1) TO '{tmp}' (FORMAT parquet)")
             tmp.replace(path)  # readers see either the old file or the new one, never half of it
+        for table in PUBLISHED:
+            path = table_path(data_dir, table)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            con.execute(f"COPY (SELECT * FROM {table}) TO '{tmp}' (FORMAT parquet)")
+            tmp.replace(path)
         count = con.execute("SELECT count(*) FROM anomalies").fetchone()[0]
         episodes = con.execute("SELECT count(*) FROM anomaly_episodes").fetchone()[0]
     log.info("model: %d anomalies in %d episodes", count, episodes)
@@ -99,6 +109,11 @@ def _load(path: Path) -> list[dict]:
         cursor = con.execute("SELECT * FROM read_parquet(?)", [str(path)])
         names = [d[0] for d in cursor.description]
         return [dict(zip(names, row)) for row in cursor.fetchall()]
+
+
+def load_table(data_dir: Path, table: str) -> list[dict]:
+    """Rows of a published mart; empty when the models have not run yet."""
+    return _load(table_path(data_dir, table))
 
 
 def load_anomalies(data_dir: Path) -> list[dict]:

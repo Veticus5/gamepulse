@@ -8,10 +8,11 @@ select
     x.hypotheses,
     x.evidence,
     x.reviews_collected,
+    x.dropped,
     x.model as explained_by_model,
     x.prompt_version,
     x.answered_by,
     x.explained_at,
     x.episode_id is not null as is_explained
 from {{ ref('anomaly_episodes') }} as e
-left join {{ ref('stg_explanations') }} as x using (episode_id)
+left join {{ ref('explanations') }} as x using (episode_id)

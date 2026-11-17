@@ -3,6 +3,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from gamepulse import model
 from gamepulse.config import Game
 from gamepulse.storage import append_jsonl
 from gamepulse.web.app import create_app
@@ -20,8 +21,20 @@ def ccu_row(ms, appid, players, ok=True):
     return {"ts": iso(ms), "appid": appid, "player_count": players if ok else None, "ok": ok, "error": None}
 
 
-@pytest.fixture
-def data_dir(tmp_path):
+def rebuild(data_dir):
+    """The site reads the tables the dbt models publish, so new raw data shows after a build."""
+    derived = data_dir / "derived"
+    # Episodes a test wrote by hand (see write_episodes) survive the build.
+    kept = {p: p.read_bytes() for p in (derived / "anomalies.parquet", derived / "anomaly_episodes.parquet")
+            if (derived / "handmade").exists() and p.exists()}
+    model.run(data_dir, GAMES)
+    for path, content in kept.items():
+        path.write_bytes(content)
+
+
+@pytest.fixture(scope="module")
+def built(tmp_path_factory):
+    tmp_path = tmp_path_factory.mktemp("built")
     raw = tmp_path / "raw"
     rows = []
     for step in range(0, 25 * 12):  # 25 hours, every 5 minutes, newest last
@@ -66,6 +79,16 @@ def data_dir(tmp_path):
             {"ts": iso(NOW), "url": "https://runtime.fivem.net/counts.json", "counts": [None, 297210, None], "ok": True},
         ],
     )
+    rebuild(tmp_path)
+    return tmp_path
+
+
+@pytest.fixture
+def data_dir(built, tmp_path):
+    """A private copy of the built data set, so a test may add to it."""
+    import shutil
+
+    shutil.copytree(built, tmp_path, dirs_exist_ok=True)
     return tmp_path
 
 
@@ -124,6 +147,7 @@ def test_game_markers_one_per_day_official_only(data_dir):
             {"gid": "m3", "appid": 730, "title": "Press piece", "date": (NOW - 1 * HOUR) // 1000, "feed_type": 0},
         ],
     )
+    rebuild(data_dir)
     result = Store(data_dir, GAMES).game(730, "24h", NOW)
     assert len(result["markers"]) == 1
     marker = result["markers"][0]
@@ -141,6 +165,7 @@ def test_game_highlights_prefer_important_recent_official_news(data_dir):
     rows.append({"gid": "big", "appid": 730, "title": "Operation X is Now Available", "date": (NOW - 60 * DAY) // 1000, "feed_type": 1})
     rows.append({"gid": "ancient", "appid": 730, "title": "Old Launch is Now Available", "date": (NOW - 200 * DAY) // 1000, "feed_type": 1})
     append_jsonl(data_dir / "raw" / "news" / "730.jsonl", rows)
+    rebuild(data_dir)
     result = Store(data_dir, GAMES).game(730, "7d", NOW)
     gids = [h["gid"] for h in result["highlights"]]
     assert len(gids) == 5
@@ -159,6 +184,7 @@ def test_review_markers_launches_per_month_and_notable_per_day(data_dir):
             {"gid": "f1", "appid": 730, "title": "Fan Art Winners", "date": (NOW - 5 * DAY) // 1000, "feed_type": 1},
         ],
     )
+    rebuild(data_dir)
     markers = Store(data_dir, GAMES).game(730, "7d", NOW)["review_markers"]
     assert [(m["count"], m["priority"]) for m in markers["monthly"]] == [(2, 3)]
     assert [m["items"][0]["gid"] for m in markers["daily"]] == ["a"]  # the patch; fan art is not notable
@@ -187,6 +213,7 @@ def test_store_picks_up_new_measurements(data_dir):
     store = Store(data_dir, GAMES)
     store.overview()
     append_jsonl(data_dir / "raw" / "ccu" / "2026-11-15.jsonl", [ccu_row(NOW + 5 * MINUTE, 730, 7777)])
+    rebuild(data_dir)
     cs = next(g for g in store.overview()["games"] if g["appid"] == 730)
     assert cs["players"] == 7777
 
@@ -230,6 +257,7 @@ def test_model_labels_replace_rules_and_move_markers_to_the_effective_date(data_
             {"gid": "b", "appid": 730, "event_type": "patch", "importance": "high", "summary": "x", "effective_date": None},
         ],
     )
+    rebuild(data_dir)
     store = Store(data_dir, GAMES)
     item = store.news_item(730, "a")
     assert (item["category"], item["priority"], item["source"]) == ("content_release", 3, "model")
@@ -249,6 +277,7 @@ def write_episodes(data_dir, episodes):
 
     derived = data_dir / "derived"
     derived.mkdir(parents=True, exist_ok=True)
+    (derived / "handmade").touch()
     ep_rows, an_rows = [], []
     for e in episodes:
         days = e["days"]
@@ -340,6 +369,7 @@ def test_episode_carries_the_agents_explanation(data_dir):
         "missing": "Treść recenzji.", "model": "m", "explained_at": "2026-11-14T12:00:00Z", "dropped": [{}],
     }
     append_jsonl(data_dir / "derived" / "explanations" / "730.jsonl", [{**record, "verdict": "unknown"}, record])
+    rebuild(data_dir)
     store = Store(data_dir, GAMES)
     cards = {e["id"]: e["explanation"] for e in store.game(730, "30d", NOW)["episodes"]}
     assert cards == {"e1": {"verdict": "possible", "summary": "Zbieżne z łatką.", "source": "model"}, "e2": None}
@@ -412,6 +442,7 @@ def test_rating_page_serves_unrated_explanations_and_stores_ratings(data_dir, tm
     monkeypatch.setattr(rate.warehouse, "load_episodes",
                         lambda d: [{"episode_id": "e1", "appid": 730, "period_end": "2026-11-15"}])
     eval_dir = tmp_path / "eval"
+    rebuild(data_dir)
     client = TestClient(create_app(data_dir, GAMES, eval_dir))
     first = client.get("/api/rate/next").json()
     assert (first["total"], first["done"]) == (1, 0)

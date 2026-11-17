@@ -296,14 +296,15 @@ def test_episode_reviews_are_read_from_disk_for_its_days_only(tmp_path):
     assert explain.load_episode_reviews(tmp_path, {**episode(), "appid": 570}) == []
 
 
-def price(day, percent, appid=730):
-    return {"ts": f"{day}T12:00:00Z", "appid": appid, "priced": True, "discount_percent": percent}
+def price(day, percent, appid=730, at="12:00:00"):
+    return {"ts": f"{day}T{at}Z", "appid": appid, "priced": True, "discount_percent": percent}
 
 
 def test_discounts_are_read_as_runs_of_days(tmp_path):
     append_jsonl(tmp_path / "raw" / "prices" / "2026-11-01.jsonl", [price("2026-11-01", 0), price("2026-11-01", 50, appid=570)])
-    append_jsonl(tmp_path / "raw" / "prices" / "gh-2026-11-05.jsonl", [price("2026-11-05", 30), price("2026-11-05", 40)])
+    append_jsonl(tmp_path / "raw" / "prices" / "gh-2026-11-05.jsonl", [price("2026-11-05", 30), price("2026-11-05", 40, at="18:00:00")])
     append_jsonl(tmp_path / "raw" / "prices" / "2026-11-06.jsonl", [price("2026-11-06", 40), price("2026-11-08", 10)])
+    explain.warehouse.run(tmp_path)  # prices are read from the published table
     first, daily = explain.load_discounts(tmp_path, 730)
     assert first == date(2026, 11, 1)
     assert daily == {date(2026, 11, 5): 40, date(2026, 11, 6): 40, date(2026, 11, 8): 10}
@@ -323,8 +324,9 @@ def test_price_history_fills_the_time_before_our_own_collection(tmp_path):
     append_jsonl(tmp_path / "raw" / "price_history" / "730.jsonl", [
         change("2025-11-20T18:23:05Z", 50), change("2025-12-04T18:20:48Z", 0), change("2026-11-15T18:00:00Z", 25),
     ])
+    explain.warehouse.run(tmp_path)
     first, daily = explain.load_discounts(tmp_path, 730)
-    assert first == date(2025, 10, 13)
+    assert first == date(2025, 11, 20)  # the first price the log actually holds
     # The sale runs from the change that started it to the one that ended it;
     # the last known price holds until the day of the fetch.
     assert min(daily) == date(2025, 11, 20) and daily[date(2025, 12, 4)] == 50 and date(2025, 12, 5) not in daily
@@ -366,6 +368,7 @@ def ollama(answer=GOOD, status=200, calls=None):
 @pytest.fixture
 def data(tmp_path, monkeypatch):
     append_jsonl(tmp_path / "raw" / "news" / "730.jsonl", NEWS)
+    explain.warehouse.run(tmp_path, [GAME])  # the agent reads the published tables
     state = {"episodes": [episode(), episode("quiet", "2026-09-01", "2026-09-02"), episode("ancient", "2025-01-01", "2025-01-02")]}
     monkeypatch.setattr(explain.warehouse, "load_episodes", lambda data_dir: state["episodes"])
     monkeypatch.setattr(explain.warehouse, "load_anomalies", lambda data_dir: parts())

@@ -3,7 +3,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from gamepulse import classify, evaluate
+from gamepulse import classify, evaluate, model
 from gamepulse.config import Game
 from gamepulse.storage import append_jsonl, read_jsonl
 from gamepulse.web.app import create_app
@@ -19,6 +19,7 @@ def data_dir(tmp_path):
             {"gid": f"{appid}-{i}", "appid": appid, "title": f"T{i}", "date": NOW - i * 86400, "feed_type": 1, "contents": "body"}
             for i in range(count)
         ] + [{"gid": f"{appid}-press", "appid": appid, "title": "P", "date": NOW, "feed_type": 0}])
+    model.run(tmp_path / "data", GAMES)  # the labelling page shows news from the published table
     return tmp_path / "data"
 
 

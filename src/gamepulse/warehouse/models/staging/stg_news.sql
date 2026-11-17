@@ -30,4 +30,4 @@ from source
 where gid is not null
   and appid is not null
   and "date" is not null
-qualify row_number() over (partition by gid order by fetched_at desc nulls last) = 1
+qualify row_number() over (partition by gid order by fetched_at desc nulls last, line_no desc) = 1

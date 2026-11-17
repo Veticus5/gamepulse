@@ -29,4 +29,4 @@ select
     {{ utc_timestamp('explained_at') }} as explained_at
 from source
 where episode_id is not null
-qualify row_number() over (partition by episode_id order by explained_at desc nulls last) = 1
+qualify row_number() over (partition by episode_id order by explained_at desc nulls last, line_no desc) = 1

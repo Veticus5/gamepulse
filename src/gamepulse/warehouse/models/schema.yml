@@ -101,6 +101,11 @@ models:
           - accepted_values:
               arguments:
                 values: [negative, positive, volume]
+  - name: explanations
+    description: The agent's latest explanation of every explained episode.
+    columns:
+      - name: episode_id
+        tests: [unique, not_null]
   - name: episode_explanations
     description: Every episode with the agent's latest explanation, if it has one.
     columns:
@@ -111,6 +116,12 @@ models:
     columns:
       - name: gid
         tests: [unique, not_null]
+  - name: player_counts
+    description: Every measurement of a game's player count.
+  - name: fivem_players
+    description: Every read of FiveM's own player count.
+  - name: prices_daily
+    description: Price and discount per game and day; the agent's evidence for discounts.
   - name: games
     description: Every game with its current player count, price, reviews and episodes.
     columns:

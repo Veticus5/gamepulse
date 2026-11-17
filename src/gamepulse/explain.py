@@ -225,44 +225,47 @@ def candidate_press(episode: dict, news: list[dict]) -> list[dict]:
     return [{"id": f"P{index}", **item} for index, item in enumerate(kept, 1)]
 
 
-def load_discounts(data_dir: Path, appid: int) -> tuple[date | None, dict[date, int]]:
-    """The first day with price data for the game and the highest discount
-    seen on each day that had one.
+def load_news(data_dir: Path, appid: int) -> tuple[list[dict], dict[str, dict]]:
+    """The game's news from the published `news` table, and the classifier's
+    labels keyed by news id. Empty when the models have not run yet."""
+    path = warehouse.table_path(data_dir, "news")
+    if not path.exists():
+        return [], {}
+    with duckdb.connect() as con:
+        rows = con.execute(
+            """
+            SELECT gid, title, epoch(published_at)::BIGINT, feed_type, feed_label, contents, url,
+                   is_labelled, event_type, strftime(effective_date, '%Y-%m-%d'), label_summary
+            FROM read_parquet(?) WHERE appid = ? ORDER BY published_at, gid
+            """,
+            [str(path), appid],
+        ).fetchall()
+    news = [
+        {"gid": gid, "title": title, "date": published, "feed_type": feed_type, "feedlabel": label,
+         "contents": contents, "url": url}
+        for gid, title, published, feed_type, label, contents, url, *_ in rows
+    ]
+    events = {
+        row[0]: {"gid": row[0], "event_type": row[8], "effective_date": row[9], "summary": row[10]}
+        for row in rows if row[7]
+    }
+    return news, events
 
-    Two sources are merged: the prices recorded by our own collector and the
-    log of price changes fetched from IsThereAnyDeal, which reaches back
-    before the collection started.
-    """
-    first = None
-    daily: dict[date, int] = {}
-    for path in sorted((data_dir / "raw" / "prices").glob("*.jsonl")):
-        for row in read_jsonl(path):
-            if row.get("appid") != appid or not isinstance(row.get("ts"), str):
-                continue
-            try:
-                day = date.fromisoformat(row["ts"][:10])
-            except ValueError:
-                continue
-            first = day if first is None or day < first else first
-            percent = row.get("discount_percent") or 0
-            if percent > 0:
-                daily[day] = max(percent, daily.get(day, 0))
-    try:
-        log = sorted(
-            (date.fromisoformat(row["ts"][:10]), int(row["discount_percent"]),
-             date.fromisoformat(row["since"][:10]), date.fromisoformat(row["fetched_at"][:10]))
-            for row in read_jsonl(data_dir / "raw" / "price_history" / f"{appid}.jsonl")
-        )
-    except (KeyError, TypeError, ValueError):
-        log = []  # a file in a shape we do not know is ignored as a whole
-    for index, (day, percent, since, fetched) in enumerate(log):
-        first = since if first is None or since < first else first
-        # A price holds until the next change; the last one until the fetch.
-        until = log[index + 1][0] if index + 1 < len(log) else fetched
-        while percent > 0 and day <= until:
-            daily[day] = max(percent, daily.get(day, 0))
-            day += timedelta(days=1)
-    return first, daily
+
+def load_discounts(data_dir: Path, appid: int) -> tuple[date | None, dict[date, int]]:
+    """The first day the game's price is known and the discount on each day
+    that had one, from the published `prices_daily` table. That table merges
+    our own price readings with the price log from IsThereAnyDeal."""
+    path = warehouse.table_path(data_dir, "prices_daily")
+    if not path.exists():
+        return None, {}
+    with duckdb.connect() as con:
+        rows = con.execute(
+            "SELECT day, discount_percent FROM read_parquet(?) WHERE appid = ? ORDER BY day", [str(path), appid]
+        ).fetchall()
+    if not rows:
+        return None, {}
+    return rows[0][0], {day: int(percent) for day, percent in rows if percent > 0}
 
 
 def candidate_discounts(episode: dict, daily: dict[date, int]) -> list[dict]:
@@ -701,11 +704,7 @@ def run(
             break
         game = by_appid[episode["appid"]]
         if game.appid not in cache:
-            cache[game.appid] = (
-                list(read_jsonl(data_dir / "raw" / "news" / f"{game.appid}.jsonl")),
-                classify.load_events(data_dir, game.appid),
-                load_explanations(data_dir, game.appid),
-            )
+            cache[game.appid] = (*load_news(data_dir, game.appid), load_explanations(data_dir, game.appid))
         news, events, done = cache[game.appid]
         pack = build_pack(game, episode, parts.get(episode["episode_id"], []), news, events,
                           load_episode_reviews(data_dir, episode), load_discounts(data_dir, game.appid))

@@ -6,7 +6,7 @@ with source as (
     select *
     from {{ read_jsonl(var("derived_dir") ~ "/news_events/*.jsonl", {
         "gid": "VARCHAR", "appid": "BIGINT", "event_type": "VARCHAR", "effective_date": "VARCHAR",
-        "summary": "VARCHAR", "importance": "VARCHAR", "confidence": "DOUBLE",
+        "summary": "VARCHAR", "importance": "VARCHAR", "confidence": "DOUBLE", "secondary_types": "VARCHAR[]",
         "model": "VARCHAR", "prompt_version": "VARCHAR", "classified_at": "VARCHAR"
     }) }}
 )
@@ -19,9 +19,10 @@ select
     summary,
     importance,
     confidence,
+    coalesce(secondary_types, []) as secondary_types,
     model,
     prompt_version,
     {{ utc_timestamp('classified_at') }} as classified_at
 from source
 where gid is not null
-qualify row_number() over (partition by gid order by classified_at desc nulls last) = 1
+qualify row_number() over (partition by gid order by classified_at desc nulls last, line_no desc) = 1
