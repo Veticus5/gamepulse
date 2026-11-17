@@ -1,0 +1,691 @@
+{
+ "553850": {
+  "name": "HELLDIVERS™ 2",
+  "categories": [
+   {
+    "id": 1,
+    "description": "Wieloosobowa"
+   },
+   {
+    "id": 9,
+    "description": "Kooperacja"
+   },
+   {
+    "id": 38,
+    "description": "Kooperacja przez internet"
+   },
+   {
+    "id": 22,
+    "description": "Osiągnięcia Steam"
+   },
+   {
+    "id": 35,
+    "description": "Zakupy w aplikacji"
+   },
+   {
+    "id": 64,
+    "description": "Regulowany rozmiar tekstu"
+   },
+   {
+    "id": 67,
+    "description": "Dostosowywanie kamery"
+   },
+   {
+    "id": 72,
+    "description": "Zamiana treści rozmowy głosowej na tekst"
+   },
+   {
+    "id": 73,
+    "description": "Zamiana treści rozmowy tekstowej na mowę"
+   },
+   {
+    "id": 66,
+    "description": "Alternatywne opcje kolorystyczne"
+   },
+   {
+    "id": 68,
+    "description": "Niestandardowa regulacja głośności"
+   },
+   {
+    "id": 78,
+    "description": "Regulowany poziom trudności"
+   },
+   {
+    "id": 71,
+    "description": "Menu odczytywane na głos"
+   },
+   {
+    "id": 74,
+    "description": "Grywalne bez działań ograniczonych czasowo"
+   },
+   {
+    "id": 55,
+    "description": "Obsługa kontrolerów DUALSHOCK"
+   },
+   {
+    "id": 57,
+    "description": "Obsługa kontrolerów DualSense"
+   },
+   {
+    "id": 58,
+    "description": "Obsługa kontrolerów DualSense"
+   },
+   {
+    "id": 69,
+    "description": "Dźwięk stereo"
+   },
+   {
+    "id": 65,
+    "description": "Opcje napisów"
+   },
+   {
+    "id": 70,
+    "description": "Dźwięk przestrzenny"
+   },
+   {
+    "id": 18,
+    "description": "Częściowa obsługa kontrolerów"
+   },
+   {
+    "id": 62,
+    "description": "Udostępnianie gier"
+   }
+  ],
+  "platforms": {
+   "windows": true,
+   "mac": false,
+   "linux": false
+  },
+  "supported_languages": "Angielski<strong>*</strong>, Francuski<strong>*</strong>, Włoski<strong>*</strong>, Niemiecki<strong>*</strong>, Hiszpański<strong>*</strong>, Japoński<strong>*</strong>, Koreański, Portugalski brazylijski<strong>*</strong>, Hiszpański latynoamerykański<strong>*</strong>, Polski, Portugalski, Rosyjski, Chiński uproszczony<strong>*</strong>, Chiński tradycyjny<br><strong>*</strong>języki z pełnym udźwiękowieniem",
+  "metacritic": null,
+  "controller_support": null,
+  "dlc": null,
+  "website": "https://www.playstation.com/games/helldivers-2/pc/",
+  "release_date": {
+   "coming_soon": false,
+   "date": "8 lutego 2024"
+  },
+  "is_free": false,
+  "required_age": "17",
+  "publishers": [
+   "PlayStation Publishing LLC"
+  ],
+  "developers": [
+   "Arrowhead Game Studios"
+  ],
+  "genres": [
+   {
+    "id": "1",
+    "description": "Akcja"
+   }
+  ]
+ },
+ "1867240": {
+  "name": "WARDOGS",
+  "categories": [
+   {
+    "id": 1,
+    "description": "Wieloosobowa"
+   },
+   {
+    "id": 49,
+    "description": "PvP"
+   },
+   {
+    "id": 36,
+    "description": "PvP przez internet"
+   },
+   {
+    "id": 22,
+    "description": "Osiągnięcia Steam"
+   },
+   {
+    "id": 29,
+    "description": "Karty kolekcjonerskie Steam"
+   },
+   {
+    "id": 67,
+    "description": "Dostosowywanie kamery"
+   },
+   {
+    "id": 68,
+    "description": "Niestandardowa regulacja głośności"
+   },
+   {
+    "id": 69,
+    "description": "Dźwięk stereo"
+   },
+   {
+    "id": 70,
+    "description": "Dźwięk przestrzenny"
+   }
+  ],
+  "platforms": {
+   "windows": true,
+   "mac": false,
+   "linux": false
+  },
+  "supported_languages": "Angielski<strong>*</strong>, Francuski, Włoski, Niemiecki, Hiszpański, Japoński, Koreański, Portugalski brazylijski, Rosyjski, Chiński uproszczony, Chiński tradycyjny, Polski, Turecki, Ukraiński<br><strong>*</strong>języki z pełnym udźwiękowieniem",
+  "metacritic": null,
+  "controller_support": null,
+  "dlc": [
+   4809970,
+   4809960,
+   4809930
+  ],
+  "website": null,
+  "release_date": {
+   "coming_soon": false,
+   "date": "10 września 2026"
+  },
+  "is_free": false,
+  "required_age": 0,
+  "publishers": [
+   "Team17"
+  ],
+  "developers": [
+   "BULKHEAD"
+  ],
+  "genres": [
+   {
+    "id": "1",
+    "description": "Akcja"
+   },
+   {
+    "id": "23",
+    "description": "Niezależne"
+   },
+   {
+    "id": "29",
+    "description": "MMO"
+   },
+   {
+    "id": "28",
+    "description": "Symulacje"
+   },
+   {
+    "id": "70",
+    "description": "Wczesny dostęp"
+   }
+  ]
+ },
+ "238960": {
+  "name": "Path of Exile",
+  "categories": [
+   {
+    "id": 2,
+    "description": "Jednoosobowa"
+   },
+   {
+    "id": 1,
+    "description": "Wieloosobowa"
+   },
+   {
+    "id": 20,
+    "description": "MMO"
+   },
+   {
+    "id": 49,
+    "description": "PvP"
+   },
+   {
+    "id": 36,
+    "description": "PvP przez internet"
+   },
+   {
+    "id": 9,
+    "description": "Kooperacja"
+   },
+   {
+    "id": 38,
+    "description": "Kooperacja przez internet"
+   },
+   {
+    "id": 22,
+    "description": "Osiągnięcia Steam"
+   },
+   {
+    "id": 28,
+    "description": "Pełna obsługa kontrolerów"
+   },
+   {
+    "id": 29,
+    "description": "Karty kolekcjonerskie Steam"
+   },
+   {
+    "id": 35,
+    "description": "Zakupy w aplikacji"
+   },
+   {
+    "id": 55,
+    "description": "Obsługa kontrolerów DUALSHOCK"
+   },
+   {
+    "id": 56,
+    "description": "Obsługa kontrolerów DUALSHOCK"
+   },
+   {
+    "id": 57,
+    "description": "Obsługa kontrolerów DualSense"
+   },
+   {
+    "id": 58,
+    "description": "Obsługa kontrolerów DualSense"
+   },
+   {
+    "id": 42,
+    "description": "Remote Play na tablecie"
+   }
+  ],
+  "platforms": {
+   "windows": true,
+   "mac": true,
+   "linux": false
+  },
+  "supported_languages": "Angielski<strong>*</strong>, Portugalski brazylijski, Rosyjski, Tajski, Francuski, Niemiecki, Hiszpański, Japoński, Koreański<br><strong>*</strong>języki z pełnym udźwiękowieniem",
+  "metacritic": {
+   "score": 86,
+   "url": "https://www.metacritic.com/game/pc/path-of-exile?ftag=MCD-06-10aaa1f"
+  },
+  "controller_support": "full",
+  "dlc": [
+   4941640,
+   4941670,
+   4941650,
+   4941680,
+   4941660,
+   4941690
+  ],
+  "website": "http://www.pathofexile.com",
+  "release_date": {
+   "coming_soon": false,
+   "date": "23 października 2013"
+  },
+  "is_free": true,
+  "required_age": 0,
+  "publishers": [
+   "Grinding Gear Games"
+  ],
+  "developers": [
+   "Grinding Gear Games"
+  ],
+  "genres": [
+   {
+    "id": "1",
+    "description": "Akcja"
+   },
+   {
+    "id": "25",
+    "description": "Przygodowe"
+   },
+   {
+    "id": "23",
+    "description": "Niezależne"
+   },
+   {
+    "id": "29",
+    "description": "MMO"
+   },
+   {
+    "id": "3",
+    "description": "RPG"
+   },
+   {
+    "id": "37",
+    "description": "Free to Play"
+   }
+  ]
+ },
+ "381210": {
+  "name": "Dead by Daylight",
+  "categories": [
+   {
+    "id": 1,
+    "description": "Wieloosobowa"
+   },
+   {
+    "id": 49,
+    "description": "PvP"
+   },
+   {
+    "id": 36,
+    "description": "PvP przez internet"
+   },
+   {
+    "id": 9,
+    "description": "Kooperacja"
+   },
+   {
+    "id": 38,
+    "description": "Kooperacja przez internet"
+   },
+   {
+    "id": 27,
+    "description": "Wieloplatformowa wieloosobowa"
+   },
+   {
+    "id": 22,
+    "description": "Osiągnięcia Steam"
+   },
+   {
+    "id": 28,
+    "description": "Pełna obsługa kontrolerów"
+   },
+   {
+    "id": 29,
+    "description": "Karty kolekcjonerskie Steam"
+   },
+   {
+    "id": 66,
+    "description": "Alternatywne opcje kolorystyczne"
+   },
+   {
+    "id": 68,
+    "description": "Niestandardowa regulacja głośności"
+   },
+   {
+    "id": 59,
+    "description": "Obsługa API Steam Input"
+   },
+   {
+    "id": 69,
+    "description": "Dźwięk stereo"
+   },
+   {
+    "id": 65,
+    "description": "Opcje napisów"
+   },
+   {
+    "id": 70,
+    "description": "Dźwięk przestrzenny"
+   },
+   {
+    "id": 23,
+    "description": "Steam Cloud"
+   },
+   {
+    "id": 41,
+    "description": "Remote Play na telefonie"
+   },
+   {
+    "id": 42,
+    "description": "Remote Play na tablecie"
+   },
+   {
+    "id": 43,
+    "description": "Remote Play na telewizorze"
+   },
+   {
+    "id": 62,
+    "description": "Udostępnianie gier"
+   }
+  ],
+  "platforms": {
+   "windows": true,
+   "mac": false,
+   "linux": false
+  },
+  "supported_languages": "Angielski<strong>*</strong>, Francuski<strong>*</strong>, Włoski, Niemiecki, Hiszpański, Rosyjski, Chiński uproszczony, Portugalski brazylijski, Tajski, Chiński tradycyjny, Japoński<strong>*</strong>, Koreański, Polski, Hiszpański latynoamerykański, Turecki<br><strong>*</strong>języki z pełnym udźwiękowieniem",
+  "metacritic": null,
+  "controller_support": "full",
+  "dlc": [
+   5060920,
+   4791830,
+   4318580,
+   4019590,
+   3884020,
+   3796620,
+   3698790,
+   3448670,
+   3261720,
+   3103150,
+   3024580,
+   2958440,
+   2661270,
+   2661250,
+   2922730,
+   2526530,
+   2526540,
+   2526550,
+   2656010,
+   1135280,
+   2515990,
+   2469400,
+   2399750,
+   2102730,
+   1899750,
+   1634040,
+   1622941,
+   1622940,
+   700282,
+   1009821,
+   750381,
+   700280,
+   1089270,
+   1324970,
+   661770,
+   509060,
+   573940,
+   492140,
+   5348550,
+   5510420
+  ],
+  "website": "http://www.deadbydaylight.com",
+  "release_date": {
+   "coming_soon": false,
+   "date": "14 czerwca 2016"
+  },
+  "is_free": false,
+  "required_age": "17",
+  "publishers": [
+   "Behaviour Interactive Inc."
+  ],
+  "developers": [
+   "Behaviour Interactive Inc."
+  ],
+  "genres": [
+   {
+    "id": "1",
+    "description": "Akcja"
+   }
+  ]
+ },
+ "3240220": {
+  "name": "Grand Theft Auto V Enhanced",
+  "categories": [
+   {
+    "id": 2,
+    "description": "Jednoosobowa"
+   },
+   {
+    "id": 1,
+    "description": "Wieloosobowa"
+   },
+   {
+    "id": 49,
+    "description": "PvP"
+   },
+   {
+    "id": 36,
+    "description": "PvP przez internet"
+   },
+   {
+    "id": 9,
+    "description": "Kooperacja"
+   },
+   {
+    "id": 38,
+    "description": "Kooperacja przez internet"
+   },
+   {
+    "id": 22,
+    "description": "Osiągnięcia Steam"
+   },
+   {
+    "id": 35,
+    "description": "Zakupy w aplikacji"
+   },
+   {
+    "id": 57,
+    "description": "Obsługa kontrolerów DualSense"
+   },
+   {
+    "id": 58,
+    "description": "Obsługa kontrolerów DualSense"
+   },
+   {
+    "id": 18,
+    "description": "Częściowa obsługa kontrolerów"
+   },
+   {
+    "id": 41,
+    "description": "Remote Play na telefonie"
+   },
+   {
+    "id": 42,
+    "description": "Remote Play na tablecie"
+   }
+  ],
+  "platforms": {
+   "windows": true,
+   "mac": false,
+   "linux": false
+  },
+  "supported_languages": "Angielski<strong>*</strong>, Francuski, Włoski, Niemiecki, Hiszpański, Japoński, Koreański, Polski, Portugalski brazylijski, Rosyjski, Chiński uproszczony, Hiszpański latynoamerykański, Chiński tradycyjny<br><strong>*</strong>języki z pełnym udźwiękowieniem",
+  "metacritic": null,
+  "controller_support": null,
+  "dlc": null,
+  "website": "https://www.rockstargames.com/V/",
+  "release_date": {
+   "coming_soon": false,
+   "date": "4 marca 2025"
+  },
+  "is_free": false,
+  "required_age": "17",
+  "publishers": [
+   "Rockstar Games"
+  ],
+  "developers": [
+   "Rockstar North"
+  ],
+  "genres": [
+   {
+    "id": "1",
+    "description": "Akcja"
+   },
+   {
+    "id": "25",
+    "description": "Przygodowe"
+   },
+   {
+    "id": "9",
+    "description": "Wyścigowe"
+   }
+  ]
+ },
+ "2868840": {
+  "name": "Slay the Spire 2",
+  "categories": [
+   {
+    "id": 2,
+    "description": "Jednoosobowa"
+   },
+   {
+    "id": 1,
+    "description": "Wieloosobowa"
+   },
+   {
+    "id": 9,
+    "description": "Kooperacja"
+   },
+   {
+    "id": 38,
+    "description": "Kooperacja przez internet"
+   },
+   {
+    "id": 28,
+    "description": "Pełna obsługa kontrolerów"
+   },
+   {
+    "id": 68,
+    "description": "Niestandardowa regulacja głośności"
+   },
+   {
+    "id": 76,
+    "description": "Tylko mysz"
+   },
+   {
+    "id": 80,
+    "description": "#category_playable_at_your_own_pace"
+   },
+   {
+    "id": 74,
+    "description": "Grywalne bez działań ograniczonych czasowo"
+   },
+   {
+    "id": 57,
+    "description": "Obsługa kontrolerów DualSense"
+   },
+   {
+    "id": 79,
+    "description": "Zapis w dowolnym momencie"
+   },
+   {
+    "id": 59,
+    "description": "Obsługa API Steam Input"
+   },
+   {
+    "id": 23,
+    "description": "Steam Cloud"
+   },
+   {
+    "id": 15,
+    "description": "Statystyki"
+   },
+   {
+    "id": 25,
+    "description": "Rankingi Steam"
+   },
+   {
+    "id": 62,
+    "description": "Udostępnianie gier"
+   }
+  ],
+  "platforms": {
+   "windows": true,
+   "mac": true,
+   "linux": true
+  },
+  "supported_languages": "Angielski, Francuski, Włoski, Niemiecki, Hiszpański, Japoński, Koreański, Polski, Portugalski brazylijski, Rosyjski, Chiński uproszczony, Hiszpański latynoamerykański, Tajski, Turecki",
+  "metacritic": null,
+  "controller_support": "full",
+  "dlc": null,
+  "website": "https://megacrit.com",
+  "release_date": {
+   "coming_soon": false,
+   "date": "5 marca 2026"
+  },
+  "is_free": false,
+  "required_age": 0,
+  "publishers": [
+   "Mega Crit"
+  ],
+  "developers": [
+   "Mega Crit"
+  ],
+  "genres": [
+   {
+    "id": "23",
+    "description": "Niezależne"
+   },
+   {
+    "id": "2",
+    "description": "Strategie"
+   },
+   {
+    "id": "70",
+    "description": "Wczesny dostęp"
+   }
+  ]
+ }
+}
