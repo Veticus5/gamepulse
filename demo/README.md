@@ -4,10 +4,16 @@ Statyczna strona pokazowa. Nie wymaga serwera, Pythona ani bazy danych.
 
 ## Jak otworzyć
 
-Otwórz plik `index.html` w przeglądarce (dwuklik albo przeciągnięcie do okna).
+Najprościej: plik `dist/gamepulse-demo.html`. To cały pokaz w jednym pliku,
+z danymi i okładkami w środku. Można go wysłać komukolwiek pocztą albo na
+czacie; otwiera się dwuklikiem w przeglądarce i działa bez internetu.
 
-Bez internetu wszystko działa, tylko zamiast okładek gier widać kolorowe pola,
-bo obrazki pochodzą z serwerów Steama.
+W repozytorium to samo jest też w wersji roboczej: `index.html` z osobnymi
+plikami stylu, skryptu i danych.
+
+Po zmianie czegokolwiek w demo plik zbiorczy trzeba zbudować od nowa:
+
+    uv run python demo/build_bundle.py
 
 ## Co pokazuje
 
@@ -56,4 +62,8 @@ Steam i trzeba je uzupełnić ręcznie przy dodaniu nowej gry.
 - `index.html`, `style.css`, `app.js`: strona, bez zewnętrznych bibliotek,
 - `data.js`: dane,
 - `store_details.json`: tryby gry, systemy i języki ze sklepu Steam,
-- `build_data.py`: eksport danych z tabel projektu.
+- `build_data.py`: eksport danych z tabel projektu,
+- `build_bundle.py`: pakuje wszystko do jednego pliku w `dist/`,
+- `covers/`: okładki gier pobrane raz z serwerów Steama,
+- `dist/gamepulse-demo.html`: pokaz w jednym pliku,
+- `dist/artifact.html`: ta sama strona w postaci do publikacji pod linkiem.

@@ -1,4 +1,6 @@
 // GamePulse demo: a static page over the snapshot in data.js. No libraries.
+// Views are named in the hash without slashes (#gra-553850-wiadomosci), which also works where the
+// page is embedded and only plain hash names are passed through.
 (function () {
   "use strict";
 
@@ -257,7 +259,7 @@
           el("h2", {}, "Co się zmieniło od Twojej ostatniej wizyty"), sincePicker()),
         el("div", { class: "panel list" },
           changed.length
-            ? changed.map((row) => el("a", { class: "list-row", href: `#/gra/${row.game.appid}` },
+            ? changed.map((row) => el("a", { class: "list-row", href: `#gra-${row.game.appid}` },
                 el("b", {}, row.game.name), el("span", { class: "muted" }, row.line)))
             : el("p", { class: "empty" }, "Nic nowego od ostatniej wizyty."))),
       el("section", {},
@@ -265,7 +267,7 @@
         el("div", { class: "grid" }, DATA.games.map((game) => {
           const rate = rate30(game);
           const episode = recentEpisode(game);
-          return el("a", { class: "card", href: `#/gra/${game.appid}` },
+          return el("a", { class: "card", href: `#gra-${game.appid}` },
             cover(game),
             el("div", { class: "card-body" },
               el("h3", {}, game.name),
@@ -515,14 +517,14 @@
     ];
   }
 
-  const TABS = [["przeglad", "Przegląd", overviewTab], ["wiadomosci", "Wiadomości", newsTab], ["o-grze", "O grze", aboutTab]];
+  const TABS = [["przeglad", "Przegląd", overviewTab], ["wiadomosci", "Wiadomości", newsTab], ["informacje", "O grze", aboutTab]];
 
   function gamePage(game, tabKey) {
     document.title = `${game.name} — GamePulse`;
     const tab = TABS.find((item) => item[0] === tabKey) || TABS[0];
     const rate = rate30(game);
     return [
-      el("a", { class: "back", href: "#/" }, "← Wszystkie gry"),
+      el("a", { class: "back", href: "#gry" }, "← Wszystkie gry"),
       el("div", { class: "game-head" },
         cover(game),
         el("div", { class: "game-title" },
@@ -533,9 +535,9 @@
             el("div", { class: "stat" }, el("b", {}, game.players_peak ? whole.format(game.players_peak) : "—"), el("span", {}, "najwięcej w ciągu doby")),
             el("div", { class: "stat" }, el("b", {}, rate === null ? "—" : percent(rate)), el("span", {}, "pozytywnych ocen, 30 dni"))))),
       el("nav", { class: "tabs", "aria-label": "Sekcje strony gry" },
-        TABS.map(([key, label]) => el("a", { class: "tab", href: `#/gra/${game.appid}/${key}`,
+        TABS.map(([key, label]) => el("a", { class: "tab", href: `#gra-${game.appid}-${key}`,
           "aria-current": key === tab[0] ? "page" : null }, label)),
-        el("a", { class: "tab side", href: `#/porownaj/${game.appid}` }, "Porównaj z inną grą")),
+        el("a", { class: "tab side", href: `#porownaj-${game.appid}` }, "Porównaj z inną grą")),
       ...tab[2](game),
     ];
   }
@@ -548,7 +550,7 @@
     const b = DATA.games.find((g) => String(g.appid) === secondId && g !== a) || DATA.games.find((g) => g !== a);
     const pick = (current, other, position) => el("select", { "aria-label": `Gra ${position}`,
       onchange: (event) => {
-        location.hash = position === 1 ? `#/porownaj/${event.target.value}/${b.appid}` : `#/porownaj/${a.appid}/${event.target.value}`;
+        location.hash = position === 1 ? `#porownaj-${event.target.value}-${b.appid}` : `#porownaj-${a.appid}-${event.target.value}`;
       } },
       DATA.games.filter((g) => g !== other).map((g) => el("option", { value: g.appid, selected: g === current }, g.name)));
 
@@ -633,7 +635,7 @@
   function route() {
     hideTip();
     redraw = [];
-    const parts = location.hash.replace(/^#\/?/, "").split("/");
+    const parts = location.hash.replace(/^#/, "").split("-");
     let page;
     if (parts[0] === "gra") {
       const game = DATA.games.find((g) => String(g.appid) === parts[1]);
@@ -645,7 +647,7 @@
     }
     app.replaceChildren(...page.filter(Boolean));
     for (const link of document.querySelectorAll(".top-link")) {
-      const active = link.getAttribute("href") === "#/porownaj" ? parts[0] === "porownaj" : parts[0] !== "porownaj";
+      const active = link.getAttribute("href") === "#porownaj" ? parts[0] === "porownaj" : parts[0] !== "porownaj";
       if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
     }
     window.scrollTo(0, 0);
