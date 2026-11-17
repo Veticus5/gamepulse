@@ -15,10 +15,12 @@ import json
 import logging
 import os
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
 
+from gamepulse import model as warehouse
 from gamepulse.config import Game
 from gamepulse.steam import SteamError, fetch_reviews_page
 from gamepulse.storage import append_jsonl, read_jsonl, utc_now_iso
@@ -75,7 +77,7 @@ def _write_state(path: Path, state: dict) -> None:
     os.replace(tmp, path)
 
 
-def _walk(client, game, path, seen, cursor, stop_ts, budget, pause, on_page) -> str:
+def _walk(client, game, path, seen, cursor, stop_ts, budget, pause, on_page, window=(None, None)) -> str:
     """Fetch pages from ``cursor`` until a review as old as ``stop_ts``.
 
     ``on_page(newest_ts, oldest_ts, next_cursor)`` runs after each stored
@@ -88,7 +90,7 @@ def _walk(client, game, path, seen, cursor, stop_ts, budget, pause, on_page) -> 
         if budget.left != budget.total and pause:
             time.sleep(pause)
         budget.left -= 1
-        reviews, following = fetch_reviews_page(client, game.appid, cursor)
+        reviews, following = fetch_reviews_page(client, game.appid, cursor, since=window[0], until=window[1])
         stamps = [r["timestamp_created"] for r in reviews if isinstance(r.get("timestamp_created"), int)]
         fetched_at = utc_now_iso()
         fresh = [r for r in reviews if r.get("recommendationid") and r["recommendationid"] not in seen]
@@ -176,3 +178,75 @@ def run(
         succeeded += 1
     log.info("review-texts: %d/%d games ok", succeeded, len(games))
     return succeeded
+
+
+def _midnight(day) -> int:
+    return int(datetime(day.year, day.month, day.day, tzinfo=UTC).timestamp())
+
+
+def run_episodes(
+    client: httpx.Client,
+    games: list[Game],
+    data_dir: Path,
+    *,
+    since_days: int = 400,
+    max_pages: int = 300,
+    pause: float = 1.0,
+    today=None,
+) -> int:
+    """Collect the reviews written during each episode that has none yet.
+
+    Steam can be asked for a stretch of dates, so an old episode costs only
+    its own reviews instead of every review written since. An episode is
+    skipped when the ordinary newest-first walk already reaches back to it
+    or when an earlier run finished it; an interrupted one resumes where it
+    stopped. Returns how many episodes are now complete.
+    """
+    cutoff = (today or datetime.now(UTC).date()) - timedelta(days=since_days)
+    by_appid = {game.appid: game for game in games}
+    wanted: dict[int, list[tuple[int, int]]] = {}
+    for episode in warehouse.load_episodes(data_dir):
+        start, end = episode["period_start"], episode["period_end"]
+        start = start.date() if isinstance(start, datetime) else start
+        end = end.date() if isinstance(end, datetime) else end
+        if episode["appid"] in by_appid and end >= cutoff:
+            wanted.setdefault(episode["appid"], []).append((_midnight(start), _midnight(end)))
+    complete = 0
+    for appid, windows in wanted.items():
+        game = by_appid[appid]
+        path = data_dir / "raw" / "reviews" / f"{appid}.jsonl"
+        walked = _read_state(data_dir / "state" / "review_texts" / f"{appid}.json")
+        state_path = data_dir / "state" / "review_windows" / f"{appid}.json"
+        state = _read_state(state_path)
+        todo = []
+        for since, until in sorted(set(windows)):
+            key = f"{since}-{until}"
+            reached = isinstance(walked.get("bottom_ts"), int) and walked["bottom_ts"] <= since
+            if reached or state.get(key, {}).get("done"):
+                complete += 1
+            else:
+                todo.append((key, since, until))
+        if not todo:
+            continue
+        seen = {row.get("recommendationid") for row in read_jsonl(path)}
+        budget = _Budget(max_pages)
+        for key, since, until in todo:
+
+            def save(newest, oldest, following, key=key):
+                state[key] = {"done": False, "cursor": following}
+                _write_state(state_path, state)
+
+            try:
+                ended = _walk(client, game, path, seen, state.get(key, {}).get("cursor") or "*", None,
+                              budget, pause, save, window=(since, until))
+            except SteamError as exc:
+                log.warning("review-texts %s (%s): %s", appid, game.name, exc)
+                break  # Steam stopped answering for this game; the next run resumes here
+            if ended != "end":
+                break  # page limit used up
+            state[key] = {"done": True, "cursor": None}
+            _write_state(state_path, state)
+            complete += 1
+        log.info("review-texts %s (%s): %d pages for %d episodes", appid, game.name, max_pages - budget.left, len(todo))
+    log.info("review-texts: %d episodes have their reviews", complete)
+    return complete

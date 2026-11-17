@@ -59,8 +59,8 @@ def built(tmp_path_factory):
     append_jsonl(
         raw / "review_histogram" / "730.jsonl",
         [
-            {"fetched_at": "x", "appid": 730, "results": {"rollups": [], "recent": []}},
-            {"fetched_at": "y", "appid": 730, "results": {
+            {"fetched_at": "2026-11-13T10:00:00Z", "appid": 730, "results": {"rollup_type": "month", "rollups": [], "recent": []}},
+            {"fetched_at": "2026-11-14T10:00:00Z", "appid": 730, "results": {"rollup_type": "month",
                 "rollups": [{"date": (NOW - 400 * DAY) // 1000, "recommendations_up": 90, "recommendations_down": 10}],
                 "recent": [{"date": (NOW - 3 * DAY) // 1000, "recommendations_up": 3, "recommendations_down": 1}],
             }},
@@ -192,8 +192,9 @@ def test_review_markers_launches_per_month_and_notable_per_day(data_dir):
 
 def test_game_reviews_carry_both_granularities(data_dir):
     reviews = Store(data_dir, GAMES).game(730, "7d", NOW)["reviews"]
-    assert reviews["daily"] == [[(NOW - 3 * DAY) // 1000 * 1000, 3, 1]]
-    assert reviews["monthly"] == [[(NOW - 400 * DAY) // 1000 * 1000, 90, 10]]
+    # Periods are whole UTC days in the tables, as Steam's own are.
+    assert reviews["daily"] == [[(NOW - 3 * DAY) // DAY * DAY, 3, 1]]
+    assert reviews["monthly"] == [[(NOW - 400 * DAY) // DAY * DAY, 90, 10]]
 
 
 def test_news_list_filters_searches_and_pages(data_dir):

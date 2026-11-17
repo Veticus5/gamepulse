@@ -13,7 +13,6 @@ from pathlib import Path
 import duckdb
 
 from gamepulse.config import Game
-from gamepulse.storage import read_jsonl
 from gamepulse.classify import priority_of
 from gamepulse.model import anomalies_path, episodes_path, table_path
 from gamepulse.web.events import classify as rule_category
@@ -100,9 +99,6 @@ class Store:
 
     # ------------------------------------------------------------ loading
 
-    def _files(self, sub: str) -> list[Path]:
-        return sorted((self.data_dir / "raw" / sub).glob("*.jsonl"))
-
     def _changed(self, name: str, files: list[Path]) -> bool:
         signature = tuple((f.name, f.stat().st_mtime_ns, f.stat().st_size) for f in files)
         if self._signatures.get(name) == signature:
@@ -164,9 +160,21 @@ class Store:
                 )
                 names = [d[0] for d in cursor.description]
                 self._events = {row[0]: dict(zip(names, row)) for row in cursor.fetchall()}
-        files = self._files("review_histogram")
+        files = self._table("review_periods")
         if self._changed("reviews", files):
-            self._reviews = self._latest_snapshots(files, "results")
+            # Per game: the days ("recent") and the weeks or months ("rollups"), oldest first.
+            self._reviews = {}
+            if files:
+                for appid, grain, date_s, up, down in self._con.execute(
+                    f"""
+                    SELECT appid, grain, epoch(period_start::TIMESTAMP)::BIGINT, positive::BIGINT, negative::BIGINT
+                    FROM read_parquet({_sql_list(files)}) ORDER BY appid, period_start
+                    """
+                ).fetchall():
+                    key = "recent" if grain == "day" else "rollups"
+                    self._reviews.setdefault(appid, {"recent": [], "rollups": []})[key].append(
+                        {"date": date_s, "recommendations_up": up, "recommendations_down": down}
+                    )
         paths = [p for p in (episodes_path(self.data_dir), anomalies_path(self.data_dir)) if p.exists()]
         if self._changed("episodes", paths):
             self._episodes = self._load_episodes(*paths) if len(paths) == 2 else {}
@@ -187,9 +195,19 @@ class Store:
                     for key in ("hypotheses", "evidence", "dropped"):
                         record[key] = json.loads(record[key]) if record[key] else []
                     self._explanations[record["episode_id"]] = record
-        files = self._files("appdetails")
+        files = self._table("games")
         if self._changed("meta", files):
-            self._meta = self._latest_snapshots(files, "details")
+            self._meta = {}
+            if files:
+                cursor = self._con.execute(
+                    f"""
+                    SELECT appid, header_image, developers, publishers, release_date_text, genres, is_free,
+                           short_description
+                    FROM read_parquet({_sql_list(files)})
+                    """
+                )
+                names = [d[0] for d in cursor.description]
+                self._meta = {row[0]: dict(zip(names, row)) for row in cursor.fetchall()}
 
     def _load_episodes(self, episodes: Path, anomalies: Path) -> dict[int, list[dict]]:
         """Episodes per game, newest first, each with its periods in order."""
@@ -381,15 +399,6 @@ class Store:
             "dropped": len(row.get("dropped") or []),
         }
 
-    @staticmethod
-    def _latest_snapshots(files: list[Path], key: str) -> dict[int, dict]:
-        latest = {}
-        for path in files:
-            rows = [r for r in read_jsonl(path) if isinstance(r.get(key), dict)]
-            if rows and path.stem.isdigit():
-                latest[int(path.stem)] = rows[-1][key]
-        return latest
-
     def _rows(self, sql: str, params: list | None = None) -> list[tuple]:
         return self._con.execute(sql, params or []).fetchall()
 
@@ -397,7 +406,6 @@ class Store:
 
     def _meta_for(self, appid: int) -> dict:
         details = self._meta.get(appid, {})
-        release = details.get("release_date") or {}
         return {
             "appid": appid,
             "name": self._by_appid[appid].name,
@@ -405,8 +413,8 @@ class Store:
             or f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg",
             "developers": details.get("developers") or [],
             "publishers": details.get("publishers") or [],
-            "release_date": release.get("date") or None,
-            "genres": [g.get("description") for g in details.get("genres") or [] if g.get("description")],
+            "release_date": details.get("release_date_text") or None,
+            "genres": details.get("genres") or [],
             "is_free": details.get("is_free"),
             "description": details.get("short_description") or None,
             "store_url": f"https://store.steampowered.com/app/{appid}/",
@@ -420,7 +428,11 @@ class Store:
             down = sum(int(r.get("recommendations_down") or 0) for r in rows or [])
             return {"up": up, "down": down, "pct": _pct(up, down)}
 
-        return {"recent": total(results.get("recent")), "all": total(results.get("rollups"))}
+        # The table keeps every day ever collected; "recent" means the last 30 of them.
+        days = results.get("recent") or []
+        newest = max((r["date"] for r in days), default=0)
+        recent = [r for r in days if r["date"] > newest - 30 * 86400]
+        return {"recent": total(recent), "all": total(results.get("rollups"))}
 
     # ------------------------------------------------------------ queries
 

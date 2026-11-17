@@ -1,0 +1,12 @@
+[Unit]
+Description=GamePulse: past Steam prices from IsThereAnyDeal
+
+[Timer]
+# Once a day; a run missed while logged out happens right after the next
+# login. The whole log is fetched again each time (two requests per game).
+OnCalendar=daily
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

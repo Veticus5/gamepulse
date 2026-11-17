@@ -1,5 +1,6 @@
 import httpx
 
+from gamepulse import collect_review_texts
 from gamepulse import collect_review_texts as crt
 from gamepulse.config import Game
 from gamepulse.storage import read_jsonl
@@ -139,3 +140,97 @@ def test_longer_history_can_be_requested_later(tmp_path, client_for):
 def test_empty_feed_is_fine(tmp_path, client_for):
     assert run(Steam([]), client_for, tmp_path) == 1
     assert stored(tmp_path) == []
+
+
+# --- reviews for the stretch of an episode
+
+def _episode_setup(monkeypatch, episodes):
+    monkeypatch.setattr(collect_review_texts.warehouse, "load_episodes", lambda data_dir: episodes)
+
+
+def _episode(appid, start, end):
+    import datetime as dt
+    return {"appid": appid, "period_start": dt.date.fromisoformat(start), "period_end": dt.date.fromisoformat(end)}
+
+
+def _stamp(day):
+    import datetime as dt
+    return int(dt.datetime.fromisoformat(day).replace(tzinfo=dt.timezone.utc).timestamp())
+
+
+def _review(number, ts):
+    return {"recommendationid": str(number), "timestamp_created": ts, "voted_up": True, "review": "text",
+            "language": "english", "author": {"steamid": "secret", "playtime_at_review": 60}}
+
+
+def test_episode_reviews_are_fetched_by_date_range(tmp_path, games, client_for, monkeypatch):
+    import datetime as dt
+    _episode_setup(monkeypatch, [
+        _episode(730, "2026-03-01", "2026-03-08"),
+        _episode(730, "2024-01-01", "2024-01-02"),  # too old to matter
+        _episode(999, "2026-03-01", "2026-03-08"),  # not a tracked game
+    ])
+    seen = []
+    pages = {"*": ([_review(1, _stamp("2026-03-07")), _review(2, _stamp("2026-03-06"))], "c2"),
+             "c2": ([_review(3, _stamp("2026-03-02"))], "c3"),
+             "c3": ([], "c3")}
+
+    def handler(request):
+        params = dict(request.url.params)
+        seen.append(params)
+        reviews, cursor = pages[params["cursor"]]
+        return httpx.Response(200, json={"success": 1, "reviews": reviews, "cursor": cursor})
+
+    done = collect_review_texts.run_episodes(client_for(handler), games, tmp_path, pause=0, today=dt.date(2026, 11, 17))
+    assert done == 1
+    assert [p["cursor"] for p in seen] == ["*", "c2", "c3"]
+    assert {(p["start_date"], p["end_date"], p["date_range_type"]) for p in seen} == {
+        (str(_stamp("2026-03-01")), str(_stamp("2026-03-08")), "include")
+    }
+    stored = read_jsonl(tmp_path / "raw" / "reviews" / "730.jsonl")
+    assert [row["recommendationid"] for row in stored] == ["1", "2", "3"]
+    assert all("steamid" not in row and "author" not in row for row in stored)  # no reviewer identity
+    # A second run has nothing left to ask for.
+    seen.clear()
+    assert collect_review_texts.run_episodes(client_for(handler), games, tmp_path, pause=0, today=dt.date(2026, 11, 17)) == 1
+    assert seen == []
+
+
+def test_episode_already_reached_by_the_ordinary_walk_is_skipped(tmp_path, games, client_for, monkeypatch):
+    import datetime as dt
+    import json
+    _episode_setup(monkeypatch, [_episode(730, "2026-11-01", "2026-11-03")])
+    state = tmp_path / "state" / "review_texts" / "730.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({"bottom_ts": _stamp("2026-10-15")}))
+
+    def handler(request):
+        raise AssertionError("no request expected")
+
+    assert collect_review_texts.run_episodes(client_for(handler), games, tmp_path, pause=0, today=dt.date(2026, 11, 17)) == 1
+
+
+def test_interrupted_episode_resumes_from_its_cursor(tmp_path, games, client_for, monkeypatch):
+    import datetime as dt
+    _episode_setup(monkeypatch, [_episode(730, "2026-03-01", "2026-03-08")])
+    calls = []
+
+    def flaky(request):
+        cursor = request.url.params["cursor"]
+        calls.append(cursor)
+        if cursor == "*":
+            return httpx.Response(200, json={"success": 1, "reviews": [_review(1, _stamp("2026-03-07"))], "cursor": "c2"})
+        return httpx.Response(200, json={"success": 1})  # Steam stops answering
+
+    assert collect_review_texts.run_episodes(client_for(flaky), games, tmp_path, pause=0, today=dt.date(2026, 11, 17)) == 0
+
+    def healthy(request):
+        cursor = request.url.params["cursor"]
+        calls.append(cursor)
+        if cursor == "c2":
+            return httpx.Response(200, json={"success": 1, "reviews": [_review(2, _stamp("2026-03-02"))], "cursor": "c3"})
+        return httpx.Response(200, json={"success": 1, "reviews": [], "cursor": cursor})
+
+    assert collect_review_texts.run_episodes(client_for(healthy), games, tmp_path, pause=0, today=dt.date(2026, 11, 17)) == 1
+    assert calls == ["*", "c2", "c2", "c3"]  # resumed at c2, not from the top
+    assert [r["recommendationid"] for r in read_jsonl(tmp_path / "raw" / "reviews" / "730.jsonl")] == ["1", "2"]

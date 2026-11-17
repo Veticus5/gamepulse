@@ -55,6 +55,11 @@ models:
           - accepted_values:
               arguments:
                 values: [likely, possible, unknown]
+  - name: stg_store_details
+    description: What the Steam store said about a game at the latest fetch.
+    columns:
+      - name: appid
+        tests: [unique, not_null]
   - name: stg_games
     description: One tracked game, from the project's own game list.
     columns:
@@ -116,6 +121,11 @@ models:
     columns:
       - name: gid
         tests: [unique, not_null]
+  - name: review_periods
+    description: Review counts per game and period; what the review chart draws.
+    tests:
+      - unique:
+          column_name: "appid || ' ' || grain || ' ' || period_start"
   - name: player_counts
     description: Every measurement of a game's player count.
   - name: fivem_players

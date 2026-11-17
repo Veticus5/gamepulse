@@ -6,6 +6,8 @@ with ids as (
     select appid from {{ ref('stg_player_counts') }}
     union
     select appid from {{ ref('int_review_periods') }}
+    union
+    select appid from {{ ref('stg_store_details') }}
 ),
 
 players as (
@@ -62,6 +64,13 @@ select
     ids.appid,
     g.name,
     g.appid is not null as is_tracked,
+    d.header_image,
+    d.developers,
+    d.publishers,
+    d.release_date_text,
+    d.genres,
+    d.is_free,
+    d.short_description,
     players.players_now,
     players.players_measured_at,
     peak.players_peak_24h,
@@ -78,6 +87,7 @@ select
     episodes.last_episode_end
 from ids
 left join {{ ref('stg_games') }} as g using (appid)
+left join {{ ref('stg_store_details') }} as d using (appid)
 left join players using (appid)
 left join peak using (appid)
 left join price using (appid)

@@ -35,7 +35,7 @@ def episodes_path(data_dir: Path) -> Path:
 
 # Marts the site and the agent read. Each is published as one parquet file,
 # because only one process can hold the database open while dbt builds it.
-PUBLISHED = ("player_counts", "fivem_players", "prices_daily", "news", "explanations", "episode_explanations", "games")
+PUBLISHED = ("review_periods", "player_counts", "fivem_players", "prices_daily", "news", "explanations", "episode_explanations", "games")
 
 
 def table_path(data_dir: Path, table: str) -> Path:

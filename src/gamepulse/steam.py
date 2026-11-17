@@ -112,22 +112,27 @@ def fetch_app_details(client: httpx.Client, appid: int) -> dict:
     return data
 
 
-def fetch_reviews_page(client: httpx.Client, appid: int, cursor: str = "*") -> tuple[list[dict], str | None]:
+def fetch_reviews_page(
+    client: httpx.Client, appid: int, cursor: str = "*", *, since: int | None = None, until: int | None = None,
+) -> tuple[list[dict], str | None]:
     """One page of up to 100 user reviews in every language, newest first,
     and the cursor of the next page (None at the end of the history).
+
+    With ``since`` and ``until`` (Unix seconds) only reviews written in that
+    stretch are returned, so an old period can be read without walking the
+    whole history down to it (checked 2026-11-17).
 
     A store endpoint, not part of the official Web API. The official
     IUserReviewsService/GetAppReviews ignores the "recent" order (checked
     2026-11-15), so it cannot be walked backwards in time.
     """
-    body = _get_json(
-        client,
-        f"{STORE_BASE}/ajaxappreviews/{appid}",
-        {
-            "json": 1, "filter": "recent", "language": "all", "purchase_type": "all", "review_type": "all",
-            "num_per_page": 100, "filter_offtopic_activity": 0, "cursor": cursor,
-        },
-    )
+    params = {
+        "json": 1, "filter": "recent", "language": "all", "purchase_type": "all", "review_type": "all",
+        "num_per_page": 100, "filter_offtopic_activity": 0, "cursor": cursor,
+    }
+    if since is not None and until is not None:
+        params.update({"start_date": since, "end_date": until, "date_range_type": "include"})
+    body = _get_json(client, f"{STORE_BASE}/ajaxappreviews/{appid}", params)
     reviews = body.get("reviews")
     if body.get("success") != 1 or not isinstance(reviews, list):
         raise SteamError(f"no reviews for appid {appid}")

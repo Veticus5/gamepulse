@@ -30,6 +30,9 @@ def _parser() -> argparse.ArgumentParser:
     texts = sub.add_parser("review-texts", parents=[steam], help="Steam user reviews: text, language, playtime")
     texts.add_argument("--days", type=int, default=30, help="how far back the history should reach (default 30)")
     texts.add_argument("--max-pages", type=int, default=300, help="pages of 100 reviews per game and run (default 300)")
+    texts.add_argument("--episodes", action="store_true",
+                       help="instead of the latest reviews, fetch those written during episodes that have none yet")
+    texts.add_argument("--since-days", type=int, default=400, help="with --episodes: only episodes this recent (default 400)")
     sub.add_parser("prices", parents=[steam], help="current store price and discount of every game")
     hist = sub.add_parser("price-history", parents=[steam], help="past Steam prices from IsThereAnyDeal (needs ITAD_API_KEY)")
     hist.add_argument("--days", type=int, default=400, help="how far back to ask (default 400)")
@@ -181,7 +184,12 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             succeeded = collect_price_history.run(client, games, args.data_dir, key=key, days=args.days)
         elif args.command == "review-texts":
-            succeeded = collect_review_texts.run(client, games, args.data_dir, days=args.days, max_pages=args.max_pages)
+            if args.episodes:
+                collect_review_texts.run_episodes(
+                    client, games, args.data_dir, since_days=args.since_days, max_pages=args.max_pages)
+                succeeded = 1  # nothing left to fetch is not a failure
+            else:
+                succeeded = collect_review_texts.run(client, games, args.data_dir, days=args.days, max_pages=args.max_pages)
         elif args.command == "explain":
             explain.run(client, games, args.data_dir, since_days=args.since_days, limit=args.limit, model=args.model)
             succeeded = 1  # nothing new to explain is not a failure

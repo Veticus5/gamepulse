@@ -1,0 +1,15 @@
+[Unit]
+Description=GamePulse: past Steam prices from IsThereAnyDeal
+StartLimitIntervalSec=30min
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/gamepulse
+# The project's own environment, created once with `uv sync`. The API key is
+# read from the .env file in the working directory (ITAD_API_KEY).
+ExecStart=%h/projects/gamepulse/.venv/bin/gamepulse price-history
+TimeoutStartSec=10min
+# A catch-up run can start before the network is up; try again shortly.
+Restart=on-failure
+RestartSec=2min
